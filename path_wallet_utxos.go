@@ -90,6 +90,29 @@ func (b *btcBackend) pathWalletUTXOsRead(ctx context.Context, req *logical.Reque
 	// Track if we need to reconnect (stale connection detected)
 	reconnectAttempted := false
 
+	// Get current block height for confirmation calculation
+	var currentBlockHeight int64
+	cachedHeight := walletCache.GetBlockHeight()
+	if cachedHeight > 0 {
+		currentBlockHeight = cachedHeight
+	} else {
+		currentBlockHeight, err = client.GetBlockHeight()
+		if err != nil {
+			b.Logger().Warn("failed to get block height", "error", err)
+			// Try reconnect
+			if b.handleClientError(err) {
+				reconnectAttempted = true
+				if newClient, reconErr := b.getClient(ctx, req.Storage); reconErr == nil {
+					client = newClient
+					currentBlockHeight, _ = client.GetBlockHeight()
+				}
+			}
+		}
+		if currentBlockHeight > 0 {
+			walletCache.SetBlockHeight(currentBlockHeight)
+		}
+	}
+
 	for _, addr := range addresses {
 		var utxos []CachedUTXO
 
@@ -198,11 +221,18 @@ func (b *btcBackend) pathWalletUTXOsRead(ctx context.Context, req *logical.Reque
 
 		// Add UTXOs to result
 		for _, utxo := range utxos {
-			// Calculate confirmations (0 if unconfirmed, 1+ if confirmed)
+			// Calculate actual confirmations from block height
 			var confirmations int64 = 0
 			if utxo.Height > 0 {
-				confirmations = 1 // At minimum, it's confirmed
-				// For accurate confirmations, we'd need current block height
+				if currentBlockHeight > 0 {
+					confirmations = currentBlockHeight - utxo.Height + 1
+					if confirmations < 0 {
+						confirmations = 0 // Sanity check for reorgs
+					}
+				} else {
+					// Block height unknown but UTXO is in a block - treat as 1 confirmation minimum
+					confirmations = 1
+				}
 			}
 
 			// Filter by min_confirmations

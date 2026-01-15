@@ -26,7 +26,17 @@ type Client struct {
 	respChan map[uint64]chan *rpcResponse
 	respMu   sync.Mutex
 	closed   bool
+	dead     bool // connection is broken, should reconnect
 }
+
+const (
+	// ConnectTimeout is the timeout for establishing a connection
+	ConnectTimeout = 10 * time.Second
+	// RequestTimeout is the timeout for individual RPC calls
+	RequestTimeout = 15 * time.Second
+	// WriteTimeout is the timeout for writing to the connection
+	WriteTimeout = 5 * time.Second
+)
 
 type rpcRequest struct {
 	JSONRPC string        `json:"jsonrpc"`
@@ -121,18 +131,21 @@ func (c *Client) parseURL(url string) error {
 func (c *Client) connect() error {
 	addr := net.JoinHostPort(c.host, c.port)
 
+	dialer := &net.Dialer{
+		Timeout:   ConnectTimeout,
+		KeepAlive: 30 * time.Second, // Enable TCP keep-alive for faster dead connection detection
+	}
+
 	var conn net.Conn
 	var err error
 
 	if c.useTLS {
-		conn, err = tls.DialWithDialer(&net.Dialer{
-			Timeout: 30 * time.Second,
-		}, "tcp", addr, &tls.Config{
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
 			MinVersion: tls.VersionTLS12,
 			ServerName: c.host, // Explicit ServerName for proper certificate validation
 		})
 	} else {
-		conn, err = net.DialTimeout("tcp", addr, 30*time.Second)
+		conn, err = dialer.Dial("tcp", addr)
 	}
 
 	if err != nil {
@@ -140,6 +153,7 @@ func (c *Client) connect() error {
 	}
 
 	c.conn = conn
+	c.dead = false
 	return nil
 }
 
@@ -150,6 +164,9 @@ func (c *Client) readResponses() {
 		if err := decoder.Decode(&resp); err != nil {
 			c.mu.Lock()
 			closed := c.closed
+			if !closed {
+				c.dead = true // Mark connection as dead for reconnection
+			}
 			c.mu.Unlock()
 			if !closed {
 				// Connection error, close all waiting channels
@@ -178,9 +195,18 @@ func (c *Client) call(method string, params ...interface{}) (json.RawMessage, er
 		c.mu.Unlock()
 		return nil, fmt.Errorf("client is closed")
 	}
+	if c.dead {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("connection is dead")
+	}
 	c.mu.Unlock()
 
 	id := c.id.Add(1)
+
+	// Ensure params is never nil - some servers reject null params
+	if params == nil {
+		params = []interface{}{}
+	}
 
 	req := rpcRequest{
 		JSONRPC: "2.0",
@@ -201,22 +227,36 @@ func (c *Client) call(method string, params ...interface{}) (json.RawMessage, er
 	data = append(data, '\n')
 
 	c.mu.Lock()
+	// Set write deadline to fail fast on broken connections
+	if err := c.conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
+		c.mu.Unlock()
+		c.respMu.Lock()
+		delete(c.respChan, id)
+		c.respMu.Unlock()
+		c.markDead()
+		return nil, fmt.Errorf("failed to set write deadline: %w", err)
+	}
 	_, err = c.conn.Write(data)
+	// Clear write deadline
+	c.conn.SetWriteDeadline(time.Time{})
 	c.mu.Unlock()
+
 	if err != nil {
 		c.respMu.Lock()
 		delete(c.respChan, id)
 		c.respMu.Unlock()
+		c.markDead()
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
 	// Wait for response with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
 	defer cancel()
 
 	select {
 	case resp, ok := <-respCh:
 		if !ok {
+			c.markDead()
 			return nil, fmt.Errorf("connection closed")
 		}
 		if resp.Error != nil {
@@ -227,8 +267,23 @@ func (c *Client) call(method string, params ...interface{}) (json.RawMessage, er
 		c.respMu.Lock()
 		delete(c.respChan, id)
 		c.respMu.Unlock()
+		c.markDead()
 		return nil, fmt.Errorf("request timeout")
 	}
+}
+
+// markDead marks the connection as dead (thread-safe)
+func (c *Client) markDead() {
+	c.mu.Lock()
+	c.dead = true
+	c.mu.Unlock()
+}
+
+// IsDead returns true if the connection is broken and should be reconnected
+func (c *Client) IsDead() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.dead
 }
 
 func (c *Client) negotiateVersion() error {

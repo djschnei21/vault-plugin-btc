@@ -108,7 +108,7 @@ func (b *btcBackend) handleClientError(err error) bool {
 // getClient returns the Electrum client, creating one if necessary
 func (b *btcBackend) getClient(ctx context.Context, s logical.Storage) (*electrum.Client, error) {
 	b.lock.RLock()
-	if b.client != nil {
+	if b.client != nil && !b.client.IsDead() {
 		b.lock.RUnlock()
 		return b.client, nil
 	}
@@ -118,8 +118,15 @@ func (b *btcBackend) getClient(ctx context.Context, s logical.Storage) (*electru
 	defer b.lock.Unlock()
 
 	// Double-check after acquiring write lock
-	if b.client != nil {
+	if b.client != nil && !b.client.IsDead() {
 		return b.client, nil
+	}
+
+	// Close dead client if exists
+	if b.client != nil {
+		b.Logger().Warn("closing dead Electrum connection, will reconnect")
+		b.client.Close()
+		b.client = nil
 	}
 
 	config, err := getConfig(ctx, s)
@@ -132,29 +139,44 @@ func (b *btcBackend) getClient(ctx context.Context, s logical.Storage) (*electru
 		network = config.Network
 	}
 
-	// Determine which server to use
-	var serverURL string
+	// Determine which server(s) to try
 	if config != nil && config.ElectrumURL != "" {
-		// User explicitly configured a server
-		serverURL = config.ElectrumURL
-	} else {
-		// Use random server from pool for this network
-		serverURL = getRandomServer(network)
-		if serverURL == "" {
-			return nil, fmt.Errorf("no default Electrum servers configured for network %q - please set electrum_url in config", network)
+		// User explicitly configured a server - only try that one
+		serverURL := config.ElectrumURL
+		b.Logger().Debug("connecting to Electrum server", "url", serverURL, "network", network)
+		client, err := electrum.NewClient(serverURL)
+		if err != nil {
+			b.Logger().Warn("failed to connect to Electrum server", "url", serverURL, "error", err)
+			return nil, err
 		}
+
+		b.Logger().Info("connected to Electrum server", "url", serverURL, "network", network)
+		b.client = client
+		return b.client, nil
 	}
 
-	b.Logger().Debug("connecting to Electrum server", "url", serverURL, "network", network)
-	client, err := electrum.NewClient(serverURL)
-	if err != nil {
-		b.Logger().Warn("failed to connect to Electrum server", "url", serverURL, "error", err)
-		return nil, err
+	// No explicit server - try servers from pool with failover
+	servers := shuffleServers(getServersForNetwork(network))
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("no default Electrum servers configured for network %q - please set electrum_url in config", network)
 	}
 
-	b.Logger().Info("connected to Electrum server", "url", serverURL, "network", network)
-	b.client = client
-	return b.client, nil
+	var lastErr error
+	for _, serverURL := range servers {
+		b.Logger().Debug("trying Electrum server", "url", serverURL, "network", network)
+		client, err := electrum.NewClient(serverURL)
+		if err != nil {
+			b.Logger().Warn("failed to connect to Electrum server, trying next", "url", serverURL, "error", err)
+			lastErr = err
+			continue
+		}
+
+		b.Logger().Info("connected to Electrum server", "url", serverURL, "network", network)
+		b.client = client
+		return b.client, nil
+	}
+
+	return nil, fmt.Errorf("failed to connect to any Electrum server: %w", lastErr)
 }
 
 const backendHelp = `

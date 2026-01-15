@@ -586,10 +586,15 @@ func (b *btcBackend) getUTXOsForWallet(ctx context.Context, s logical.Storage, w
 		for _, utxo := range utxos {
 			// Calculate actual confirmations from block height
 			var confirmations int64 = 0
-			if utxo.Height > 0 && currentBlockHeight > 0 {
-				confirmations = currentBlockHeight - utxo.Height + 1
-				if confirmations < 0 {
-					confirmations = 0 // Sanity check for reorgs
+			if utxo.Height > 0 {
+				if currentBlockHeight > 0 {
+					confirmations = currentBlockHeight - utxo.Height + 1
+					if confirmations < 0 {
+						confirmations = 0 // Sanity check for reorgs
+					}
+				} else {
+					// Block height unknown but UTXO is in a block - treat as 1 confirmation minimum
+					confirmations = 1
 				}
 			}
 			// Height == 0 means unconfirmed (mempool)

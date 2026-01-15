@@ -30,20 +30,24 @@ var (
 	SignetElectrumServers = []string{}
 )
 
+// getServersForNetwork returns the server list for the given network
+func getServersForNetwork(network string) []string {
+	switch network {
+	case "mainnet":
+		return MainnetElectrumServers
+	case "testnet4":
+		return Testnet4ElectrumServers
+	case "signet":
+		return SignetElectrumServers
+	default:
+		return MainnetElectrumServers
+	}
+}
+
 // getRandomServer returns a random server from the list for the given network
 // Uses crypto/rand for secure randomness
 func getRandomServer(network string) string {
-	var servers []string
-	switch network {
-	case "mainnet":
-		servers = MainnetElectrumServers
-	case "testnet4":
-		servers = Testnet4ElectrumServers
-	case "signet":
-		servers = SignetElectrumServers
-	default:
-		servers = MainnetElectrumServers
-	}
+	servers := getServersForNetwork(network)
 
 	if len(servers) == 0 {
 		return ""
@@ -57,6 +61,28 @@ func getRandomServer(network string) string {
 	}
 
 	return servers[n.Int64()]
+}
+
+// shuffleServers returns a shuffled copy of the server list
+func shuffleServers(servers []string) []string {
+	if len(servers) <= 1 {
+		return servers
+	}
+
+	shuffled := make([]string, len(servers))
+	copy(shuffled, servers)
+
+	// Fisher-Yates shuffle with crypto/rand
+	for i := len(shuffled) - 1; i > 0; i-- {
+		n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			continue
+		}
+		j := n.Int64()
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	}
+
+	return shuffled
 }
 
 // btcConfig stores the secrets engine configuration
