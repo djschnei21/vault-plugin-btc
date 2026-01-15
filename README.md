@@ -554,31 +554,7 @@ POST btc/wallets/:name/estimate
 
 ### PSBT Operations
 
-For complex transactions, use PSBTs (Partially Signed Bitcoin Transactions).
-
-#### Create PSBT
-
-```
-POST btc/wallets/:name/psbt/create
-```
-
-**Parameters:**
-- `outputs` (string, required) - JSON array: `[{"address":"bc1...","amount":50000}]`
-- `fee_rate` (int) - Fee rate in sat/vbyte (default: 10)
-- `min_confirmations` (int) - Override config min_confirmations
-
-**Response:**
-```json
-{
-  "psbt": "cHNidP8BAH0CAA...",
-  "fee": 1410,
-  "inputs_count": 1,
-  "total_input": 150000,
-  "total_output": 50000,
-  "change_address": "bc1q...",
-  "change_amount": 98590
-}
-```
+PSBTs (Partially Signed Bitcoin Transactions) enable watch-only wallet workflows and multi-sig setups. Create PSBTs in external software (Sparrow, Caravan) and sign them with Vault.
 
 #### Sign PSBT
 
