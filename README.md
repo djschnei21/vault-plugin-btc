@@ -215,6 +215,40 @@ DELETE btc/wallets/:name
 
 > **Warning:** Deleting a wallet permanently destroys the seed. Ensure all funds are transferred first.
 
+#### Export Extended Public Key (xpub)
+```
+GET btc/wallets/:name/xpub
+```
+
+Exports the account-level extended public key for watch-only wallet setup in external software like Sparrow.
+
+**Response:**
+```json
+{
+  "xpub": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
+  "format": "zpub",
+  "derivation_path": "m/84'/0'/0'",
+  "address_type": "p2wpkh",
+  "network": "mainnet",
+  "descriptor": "wpkh([fingerprint/84'/0'/0']zpub.../&lt;0;1&gt;/*)"
+}
+```
+
+**Key formats by wallet type:**
+- `p2wpkh` mainnet: `zpub` (SLIP-0132)
+- `p2wpkh` testnet: `vpub` (SLIP-0132)
+- `p2tr` mainnet: `xpub` (standard)
+- `p2tr` testnet: `tpub` (standard)
+
+**Watch-only wallet workflow:**
+1. Export the xpub: `vault read btc/wallets/my-wallet/xpub`
+2. Import into Sparrow as a watch-only wallet
+3. Use Sparrow to construct PSBTs
+4. Sign the PSBT via Vault: `vault write btc/wallets/my-wallet/psbt/sign psbt="..."`
+5. Broadcast the signed transaction
+
+> **Security Note:** The xpub allows deriving all addresses but cannot spend funds. Treat it as sensitive since it reveals your complete transaction history.
+
 ---
 
 ### Addresses

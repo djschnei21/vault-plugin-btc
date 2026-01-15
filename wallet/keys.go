@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -211,4 +212,211 @@ func DerivationPathForType(network string, change, index uint32, addressType str
 		purpose = BIP86Purpose
 	}
 	return fmt.Sprintf("m/%d'/%d'/0'/%d/%d", purpose, coinType, change, index)
+}
+
+// SLIP-0132 version bytes for extended public keys
+// These allow wallets like Sparrow to recognize the key type from the prefix
+var (
+	// BIP84 zpub (mainnet native segwit) - version 0x04b24746
+	zpubVersion = [4]byte{0x04, 0xb2, 0x47, 0x46}
+	// BIP84 vpub (testnet native segwit) - version 0x045f1cf6
+	vpubVersion = [4]byte{0x04, 0x5f, 0x1c, 0xf6}
+)
+
+// GetAccountXpub returns the account-level extended public key for watch-only wallet import.
+// For BIP84 (p2wpkh), returns zpub (mainnet) or vpub (testnet) format per SLIP-0132.
+// For BIP86 (p2tr), returns standard xpub/tpub format (no SLIP-0132 standard exists).
+// The returned key can be imported into wallets like Sparrow as a watch-only wallet.
+func GetAccountXpub(seed []byte, network string, addressType string) (string, string, error) {
+	// Derive the account key (private)
+	accountKey, err := DeriveAccountKeyForType(seed, network, 0, addressType)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to derive account key: %w", err)
+	}
+
+	// Get the public key version (neutered)
+	accountPubKey, err := accountKey.Neuter()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to neuter account key: %w", err)
+	}
+
+	// Get the derivation path for documentation
+	coinType := CoinTypeBitcoin
+	if network == "testnet4" || network == "signet" {
+		coinType = CoinTypeBitcoinTestnet
+	}
+	purpose := BIP84Purpose
+	if addressType == AddressTypeP2TR {
+		purpose = BIP86Purpose
+	}
+	derivationPath := fmt.Sprintf("m/%d'/%d'/0'", purpose, coinType)
+
+	// For BIP84, convert to SLIP-0132 format (zpub/vpub)
+	if addressType == AddressTypeP2WPKH {
+		xpubStr := accountPubKey.String()
+		converted, err := convertToSlip132(xpubStr, network)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to convert to SLIP-0132: %w", err)
+		}
+		return converted, derivationPath, nil
+	}
+
+	// For BIP86, return standard format (no SLIP-0132 standard for Taproot)
+	return accountPubKey.String(), derivationPath, nil
+}
+
+// convertToSlip132 converts a standard xpub/tpub to SLIP-0132 zpub/vpub format
+func convertToSlip132(xpub string, network string) (string, error) {
+	// Decode the base58check encoded xpub
+	decoded, version, err := decodeBase58Check(xpub)
+	if err != nil {
+		return "", err
+	}
+
+	// Verify it's a public key (xpub or tpub)
+	params, err := NetworkParams(network)
+	if err != nil {
+		return "", err
+	}
+
+	xpubBytes := params.HDPublicKeyID[:]
+	if !bytesEqual(version, xpubBytes) {
+		return "", fmt.Errorf("unexpected version bytes: got %x, expected %x", version, xpubBytes)
+	}
+
+	// Replace version bytes with SLIP-0132 version
+	var newVersion [4]byte
+	if network == "mainnet" {
+		newVersion = zpubVersion
+	} else {
+		newVersion = vpubVersion
+	}
+
+	return encodeBase58Check(decoded, newVersion[:]), nil
+}
+
+// decodeBase58Check decodes a base58check encoded string, returning the payload and version
+func decodeBase58Check(encoded string) ([]byte, []byte, error) {
+	// Base58 alphabet
+	const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+	// Decode base58
+	var result []byte
+	for _, c := range encoded {
+		charIndex := -1
+		for i, a := range alphabet {
+			if a == c {
+				charIndex = i
+				break
+			}
+		}
+		if charIndex == -1 {
+			return nil, nil, fmt.Errorf("invalid base58 character: %c", c)
+		}
+
+		// Multiply result by 58 and add charIndex
+		carry := charIndex
+		for i := len(result) - 1; i >= 0; i-- {
+			carry += int(result[i]) * 58
+			result[i] = byte(carry & 0xff)
+			carry >>= 8
+		}
+		for carry > 0 {
+			result = append([]byte{byte(carry & 0xff)}, result...)
+			carry >>= 8
+		}
+	}
+
+	// Add leading zeros
+	for _, c := range encoded {
+		if c != '1' {
+			break
+		}
+		result = append([]byte{0}, result...)
+	}
+
+	// Verify checksum (last 4 bytes)
+	if len(result) < 5 {
+		return nil, nil, fmt.Errorf("decoded data too short")
+	}
+
+	// Split into version (4 bytes) + payload + checksum (4 bytes)
+	version := result[:4]
+	payload := result[4 : len(result)-4]
+
+	return payload, version, nil
+}
+
+// encodeBase58Check encodes data with version bytes using base58check
+func encodeBase58Check(payload []byte, version []byte) string {
+	// Base58 alphabet
+	const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+	// Combine version + payload
+	data := append(version, payload...)
+
+	// Calculate double SHA256 checksum
+	hash1 := sha256Sum(data)
+	hash2 := sha256Sum(hash1)
+	checksum := hash2[:4]
+
+	// Append checksum
+	data = append(data, checksum...)
+
+	// Count leading zeros
+	var leadingZeros int
+	for _, b := range data {
+		if b != 0 {
+			break
+		}
+		leadingZeros++
+	}
+
+	// Convert to base58
+	var result []byte
+	for _, b := range data {
+		carry := int(b)
+		for i := len(result) - 1; i >= 0; i-- {
+			carry += int(result[i]) << 8
+			result[i] = byte(carry % 58)
+			carry /= 58
+		}
+		for carry > 0 {
+			result = append([]byte{byte(carry % 58)}, result...)
+			carry /= 58
+		}
+	}
+
+	// Add leading '1's for each leading zero byte
+	for i := 0; i < leadingZeros; i++ {
+		result = append([]byte{0}, result...)
+	}
+
+	// Convert to alphabet
+	encoded := make([]byte, len(result))
+	for i, b := range result {
+		encoded[i] = alphabet[b]
+	}
+
+	return string(encoded)
+}
+
+// sha256Sum computes SHA256 hash
+func sha256Sum(data []byte) []byte {
+	h := sha256.New()
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+// bytesEqual compares two byte slices
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

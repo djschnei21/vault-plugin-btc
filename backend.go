@@ -48,6 +48,7 @@ func backend() *btcBackend {
 			pathWalletAddresses(b),
 			pathWalletUTXOs(b),
 			pathWalletQR(b),
+			pathWalletXpub(b),
 			pathWalletSend(b),
 			pathWalletPSBT(b),
 			pathWalletConsolidate(b),
@@ -201,6 +202,7 @@ Endpoints:
   btc/wallets/:name/addresses     - List/generate addresses
   btc/wallets/:name/utxos         - List all UTXOs
   btc/wallets/:name/qr            - QR code for receive address
+  btc/wallets/:name/xpub          - Export extended public key for watch-only wallets
   btc/wallets/:name/send          - Send bitcoin
   btc/wallets/:name/estimate      - Estimate send fee
   btc/wallets/:name/consolidate   - Consolidate UTXOs

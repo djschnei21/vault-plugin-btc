@@ -564,3 +564,107 @@ func TestHardenedKeyDerivation(t *testing.T) {
 		t.Error("Should not be able to derive hardened child from public key")
 	}
 }
+
+func TestGetAccountXpub(t *testing.T) {
+	seed, _ := hex.DecodeString("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+
+	t.Run("mainnet p2wpkh returns zpub", func(t *testing.T) {
+		xpub, path, err := GetAccountXpub(seed, "mainnet", AddressTypeP2WPKH)
+		if err != nil {
+			t.Fatalf("GetAccountXpub() error = %v", err)
+		}
+
+		// zpub starts with "zpub"
+		if len(xpub) < 4 || xpub[:4] != "zpub" {
+			t.Errorf("GetAccountXpub() mainnet p2wpkh should return zpub, got %s", xpub[:10])
+		}
+
+		// Path should be BIP84
+		if path != "m/84'/0'/0'" {
+			t.Errorf("GetAccountXpub() path = %s, want m/84'/0'/0'", path)
+		}
+	})
+
+	t.Run("testnet p2wpkh returns vpub", func(t *testing.T) {
+		xpub, path, err := GetAccountXpub(seed, "testnet4", AddressTypeP2WPKH)
+		if err != nil {
+			t.Fatalf("GetAccountXpub() error = %v", err)
+		}
+
+		// vpub starts with "vpub"
+		if len(xpub) < 4 || xpub[:4] != "vpub" {
+			t.Errorf("GetAccountXpub() testnet p2wpkh should return vpub, got %s", xpub[:10])
+		}
+
+		// Path should be BIP84 testnet
+		if path != "m/84'/1'/0'" {
+			t.Errorf("GetAccountXpub() path = %s, want m/84'/1'/0'", path)
+		}
+	})
+
+	t.Run("mainnet p2tr returns xpub", func(t *testing.T) {
+		xpub, path, err := GetAccountXpub(seed, "mainnet", AddressTypeP2TR)
+		if err != nil {
+			t.Fatalf("GetAccountXpub() error = %v", err)
+		}
+
+		// p2tr uses standard xpub format (no SLIP-0132 standard)
+		if len(xpub) < 4 || xpub[:4] != "xpub" {
+			t.Errorf("GetAccountXpub() mainnet p2tr should return xpub, got %s", xpub[:10])
+		}
+
+		// Path should be BIP86
+		if path != "m/86'/0'/0'" {
+			t.Errorf("GetAccountXpub() path = %s, want m/86'/0'/0'", path)
+		}
+	})
+
+	t.Run("testnet p2tr returns tpub", func(t *testing.T) {
+		xpub, path, err := GetAccountXpub(seed, "testnet4", AddressTypeP2TR)
+		if err != nil {
+			t.Fatalf("GetAccountXpub() error = %v", err)
+		}
+
+		// p2tr uses standard tpub format on testnet
+		if len(xpub) < 4 || xpub[:4] != "tpub" {
+			t.Errorf("GetAccountXpub() testnet p2tr should return tpub, got %s", xpub[:10])
+		}
+
+		// Path should be BIP86 testnet
+		if path != "m/86'/1'/0'" {
+			t.Errorf("GetAccountXpub() path = %s, want m/86'/1'/0'", path)
+		}
+	})
+
+	t.Run("same seed produces same xpub", func(t *testing.T) {
+		xpub1, _, _ := GetAccountXpub(seed, "mainnet", AddressTypeP2WPKH)
+		xpub2, _, _ := GetAccountXpub(seed, "mainnet", AddressTypeP2WPKH)
+
+		if xpub1 != xpub2 {
+			t.Errorf("GetAccountXpub() should be deterministic, got different results")
+		}
+	})
+
+	t.Run("different address types produce different xpubs", func(t *testing.T) {
+		xpubP2WPKH, _, _ := GetAccountXpub(seed, "mainnet", AddressTypeP2WPKH)
+		xpubP2TR, _, _ := GetAccountXpub(seed, "mainnet", AddressTypeP2TR)
+
+		if xpubP2WPKH == xpubP2TR {
+			t.Error("GetAccountXpub() should produce different keys for different address types")
+		}
+	})
+
+	t.Run("invalid network returns error", func(t *testing.T) {
+		_, _, err := GetAccountXpub(seed, "invalid", AddressTypeP2WPKH)
+		if err == nil {
+			t.Error("GetAccountXpub() should fail for invalid network")
+		}
+	})
+
+	t.Run("invalid address type returns error", func(t *testing.T) {
+		_, _, err := GetAccountXpub(seed, "mainnet", "invalid")
+		if err == nil {
+			t.Error("GetAccountXpub() should fail for invalid address type")
+		}
+	})
+}
