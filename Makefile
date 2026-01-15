@@ -1,6 +1,6 @@
 .PHONY: all build clean test fmt lint dev
 
-PLUGIN_NAME := vault-plugin-secrets-btc
+PLUGIN_NAME := vault-plugin-btc
 PLUGIN_DIR := vault/plugins
 GOARCH := $(shell go env GOARCH)
 GOOS := $(shell go env GOOS)

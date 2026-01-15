@@ -7,7 +7,7 @@ import (
 	"github.com/hashicorp/vault/api"
 	"github.com/hashicorp/vault/sdk/plugin"
 
-	btc "github.com/dan/vault-plugin-secrets-btc"
+	btc "github.com/djschnei21/vault-plugin-btc"
 )
 
 func main() {

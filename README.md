@@ -90,17 +90,17 @@ vault write btc/config network=mainnet electrum_url="ssl://electrum.blockstream.
 ### Building from Source
 
 ```bash
-git clone https://github.com/dan/vault-plugin-secrets-btc.git
-cd vault-plugin-secrets-btc
+git clone https://github.com/djschnei21/vault-plugin-btc.git
+cd vault-plugin-btc
 make build
 ```
 
 ### Registering with Vault
 
 ```bash
-SHA256=$(sha256sum vault/plugins/vault-plugin-secrets-btc | cut -d' ' -f1)
-vault plugin register -sha256=$SHA256 secret vault-plugin-secrets-btc
-vault secrets enable -path=btc vault-plugin-secrets-btc
+SHA256=$(sha256sum vault/plugins/vault-plugin-btc | cut -d' ' -f1)
+vault plugin register -sha256=$SHA256 secret vault-plugin-btc
+vault secrets enable -path=btc vault-plugin-btc
 ```
 
 ## Configuration
@@ -717,7 +717,7 @@ Reading a wallet returns `receive_address` - the first unused address from the p
 
 ```
 vault-plugin-btc/
-├── cmd/vault-plugin-secrets-btc/main.go
+├── cmd/vault-plugin-btc/main.go
 ├── backend.go              # Backend factory, client management
 ├── cache.go                # Address/balance caching
 ├── path_config.go          # Configuration endpoint

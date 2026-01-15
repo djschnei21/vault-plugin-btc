@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
 
-	"github.com/dan/vault-plugin-secrets-btc/electrum"
+	"github.com/djschnei21/vault-plugin-btc/electrum"
 )
 
 // btcBackend defines the backend for the Bitcoin secrets engine

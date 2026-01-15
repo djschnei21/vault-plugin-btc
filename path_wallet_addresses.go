@@ -8,7 +8,7 @@ import (
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
 
-	"github.com/dan/vault-plugin-secrets-btc/wallet"
+	"github.com/djschnei21/vault-plugin-btc/wallet"
 )
 
 func pathWalletAddresses(b *btcBackend) []*framework.Path {

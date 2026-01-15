@@ -5,7 +5,7 @@
 *.so
 *.dylib
 vault/plugins/
-/vault-plugin-secrets-btc
+/vault-plugin-btc
 
 # Test binary, built with `go test -c`
 *.test

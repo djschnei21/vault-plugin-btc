@@ -7,8 +7,8 @@ import (
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
 
-	"github.com/dan/vault-plugin-secrets-btc/electrum"
-	"github.com/dan/vault-plugin-secrets-btc/wallet"
+	"github.com/djschnei21/vault-plugin-btc/electrum"
+	"github.com/djschnei21/vault-plugin-btc/wallet"
 )
 
 // CompactionResult holds the results of a compaction operation
