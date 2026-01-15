@@ -618,6 +618,62 @@ POST btc/wallets/:name/psbt/finalize
 }
 ```
 
+---
+
+### Multi-Sig Support
+
+Vault can participate as one signer in a multi-sig (m-of-n) setup. The recommended workflow uses Vault as a signing device while an external coordinator (Sparrow, Caravan, Nunchuk) manages the multi-sig wallet.
+
+#### Setup (One-Time)
+
+```bash
+# 1. Export xpub from Vault
+vault read btc/wallets/treasury/xpub
+# Returns: zpub6rFR7y4Q2AijBE... (for p2wpkh wallet)
+
+# 2. Export xpubs from other signers (Coldcard, Ledger, etc.)
+# 3. Import all xpubs into coordinator (Sparrow) to create multi-sig wallet
+# 4. Sparrow generates the multi-sig descriptor and addresses
+```
+
+#### Spending from Multi-Sig
+
+```bash
+# 1. Create PSBT in Sparrow (or other coordinator)
+# 2. Export PSBT and sign with Vault
+vault write btc/wallets/treasury/psbt/sign psbt="cHNidP8BAH..."
+# Response shows inputs_signed: 1 (Vault's signature added)
+
+# 3. Sign with other signers (Coldcard, Ledger, etc.)
+# 4. Once threshold met (e.g., 2-of-3), finalize in Sparrow or Vault:
+vault write btc/wallets/treasury/psbt/finalize psbt="cHNidP8..." broadcast=true
+```
+
+#### Supported Multi-Sig Types
+
+| Type | Script | Notes |
+|------|--------|-------|
+| P2WSH | Native SegWit multi-sig | Most common, lower fees |
+| P2SH-P2WSH | Wrapped SegWit | Legacy compatibility |
+
+The `/psbt/sign` endpoint automatically detects multi-sig inputs by:
+1. Matching BIP32 derivation paths in the PSBT
+2. Scanning witness scripts for pubkeys derived from the wallet
+
+#### Example: 2-of-3 Multi-Sig with Vault
+
+```
+Signer 1: Vault (zpub from vault read btc/wallets/treasury/xpub)
+Signer 2: Coldcard hardware wallet
+Signer 3: Ledger hardware wallet
+
+Coordinator: Sparrow (manages addresses, creates PSBTs)
+
+Spending requires any 2 of 3 signatures.
+```
+
+---
+
 ## Usage Examples
 
 ### Basic Workflow
