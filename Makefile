@@ -32,36 +32,22 @@ lint:
 
 # Development mode: start Vault with the plugin
 dev: build
-	@echo "Starting Vault in dev mode with debug logging..."
-	@echo "Plugin SHA256: $$(sha256sum $(PLUGIN_DIR)/$(PLUGIN_NAME) | cut -d' ' -f1)"
+	@echo "Starting Vault in dev mode..."
+	@echo ""
+	@echo "In another terminal, run:"
+	@echo "  export VAULT_ADDR='http://127.0.0.1:8200'"
+	@echo "  export VAULT_TOKEN='root'"
+	@echo "  vault secrets enable -path=btc vault-plugin-btc"
+	@echo ""
 	vault server -dev -dev-root-token-id=root -dev-plugin-dir=$(PLUGIN_DIR) -log-level=debug
-
-# Register and enable the plugin (run in another terminal after 'make dev')
-enable:
-	@echo "Registering plugin..."
-	vault plugin register -sha256=$$(sha256sum $(PLUGIN_DIR)/$(PLUGIN_NAME) | cut -d' ' -f1) secret $(PLUGIN_NAME)
-	@echo "Enabling plugin at btc/..."
-	vault secrets enable -path=btc $(PLUGIN_NAME)
-	@echo "Plugin enabled!"
-
-# Quick test workflow
-quicktest: enable
-	@echo "Creating test wallet..."
-	vault write btc/config network=testnet
-	vault write btc/roles/test-wallet
-	vault write btc/addresses/test-wallet
-	vault read btc/balance/test-wallet
-	vault read btc/addresses/test-wallet
 
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  build      - Build the plugin binary"
-	@echo "  clean      - Remove build artifacts"
-	@echo "  test       - Run tests"
-	@echo "  fmt        - Format Go code"
-	@echo "  lint       - Run golangci-lint"
-	@echo "  dev        - Start Vault in dev mode with plugin"
-	@echo "  enable     - Register and enable the plugin (run after 'make dev')"
-	@echo "  quicktest  - Run quick test workflow"
-	@echo "  help       - Show this help"
+	@echo "  build  - Build the plugin binary"
+	@echo "  clean  - Remove build artifacts"
+	@echo "  test   - Run tests"
+	@echo "  fmt    - Format Go code"
+	@echo "  lint   - Run golangci-lint"
+	@echo "  dev    - Start Vault in dev mode with plugin"
+	@echo "  help   - Show this help"

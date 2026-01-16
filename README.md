@@ -10,7 +10,7 @@ A HashiCorp Vault secrets engine plugin for Bitcoin custodial operations. Lightw
 ## Features
 
 - **HD Wallet Management** - BIP84/BIP86 hierarchical deterministic wallets with secure seed storage
-- **Taproot Support** - Default `bc1p...` (P2TR) addresses with Schnorr signatures, or legacy `bc1q...` (P2WPKH)
+- **Taproot Support** - Default `bc1p...` (P2TR) addresses with Schnorr signatures, or `bc1q...` (P2WPKH)
 - **Automatic Address Reuse Prevention** - Tracks spent addresses and prevents receiving to previously-used addresses
 - **Simple Send/Receive** - Streamlined API for common custodial operations
 - **Watch-Only Wallet Coordination** - Export xpubs for use with Sparrow, Caravan, or other wallet software
@@ -18,844 +18,465 @@ A HashiCorp Vault secrets engine plugin for Bitcoin custodial operations. Lightw
 - **Multi-Sig Support** - Participate as one signer in multi-sig setups with external coordinators
 - **Fee Estimation** - Preview transaction fees before sending
 - **UTXO Management** - List, consolidate, and manage UTXOs with privacy warnings
-- **Multi-Network Support** - Mainnet, Testnet4, and custom Signet configurations
+- **Multi-Network Support** - Mainnet, Testnet4, and Signet
 - **Automatic Reconnection** - Recovers gracefully from stale Electrum connections
 
 ## Quick Start
 
-### Setup
-
 ```bash
-# Build the plugin
-make build
-
-# Start Vault in dev mode (terminal 1)
+# Build and start Vault in dev mode (terminal 1)
 make dev
 
-# In another terminal, enable the plugin
+# In another terminal, mount the plugin
 export VAULT_ADDR='http://127.0.0.1:8200'
 export VAULT_TOKEN='root'
-make enable
-```
-
-### Network Configuration
-
-**Testnet4** (recommended for testing):
-```bash
-vault write btc/config network=testnet4
-```
-
-**Mainnet**:
-```bash
-vault write btc/config network=mainnet
-```
-
-**Custom Electrum server** (optional):
-```bash
-vault write btc/config network=mainnet electrum_url="ssl://your-server:50002"
-```
-
-| Network | Default Server Pool |
-|---------|---------------------|
-| Mainnet | `electrum.blockstream.info`, `electrum.bitaroo.net`, `electrum.emzy.de` |
-| Testnet4 | `mempool.space`, `electrum.blockstream.info` |
-| Signet | (requires explicit `electrum_url`) |
-
-### Walkthrough
-
-```bash
-# Create a wallet (Taproot by default)
-vault write btc/wallets/demo description="Demo wallet"
-
-# View wallet info and receive address
-vault read btc/wallets/demo
-
-# Generate QR code for receiving (ASCII for terminal)
-vault read btc/wallets/demo/qr format=ascii -format=json | jq -r '.data.qr'
-
-# List addresses
-vault read btc/wallets/demo/addresses
-
-# Generate more addresses
-vault write btc/wallets/demo/addresses count=3
-
-# Check UTXOs after receiving funds
-vault read btc/wallets/demo/utxos
-
-# Estimate a send
-vault write btc/wallets/demo/estimate to="tb1p..." amount=10000 fee_rate=5
-
-# Send bitcoin
-vault write btc/wallets/demo/send to="tb1p..." amount=10000 fee_rate=5
-
-# Consolidate UTXOs (reduces future fees)
-vault write btc/wallets/demo/consolidate fee_rate=2 dry_run=true  # preview
-vault write btc/wallets/demo/consolidate fee_rate=2               # execute
-
-# Compact spent addresses (cleanup)
-vault write btc/wallets/demo/compact
-
-# Scan for funds on retired addresses
-vault read btc/wallets/demo/scan
-
-# Export xpub for watch-only wallet setup
-vault read btc/wallets/demo/xpub
-
-# List all wallets
-vault list btc/wallets
-```
-
-### SegWit Wallets
-
-For legacy `bc1q...` addresses instead of Taproot:
-```bash
-vault write btc/wallets/legacy address_type=p2wpkh
-```
-
-> **Note:** For production, consider running your own Electrum server for privacy and reliability.
-
-## Installation
-
-### Prerequisites
-
-- Go 1.21 or later
-- HashiCorp Vault 1.15 or later
-
-### Building from Source
-
-```bash
-git clone https://github.com/djschnei21/vault-plugin-btc.git
-cd vault-plugin-btc
-make build
-```
-
-### Registering with Vault
-
-```bash
-SHA256=$(sha256sum vault/plugins/vault-plugin-btc | cut -d' ' -f1)
-vault plugin register -sha256=$SHA256 secret vault-plugin-btc
 vault secrets enable -path=btc vault-plugin-btc
 ```
 
-## Configuration
-
-Configure the secrets engine with a network. Electrum server is optional - if not specified, a random server from the default pool is used per connection:
-
-```bash
-# Use random server from pool (recommended)
-vault write btc/config network=testnet4
-
-# Or specify a server explicitly
-vault write btc/config \
-    network=mainnet \
-    electrum_url="ssl://electrum.blockstream.info:50002" \
-    min_confirmations=1
-```
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `network` | `mainnet` | Bitcoin network (`mainnet`, `testnet4`, or `signet`) |
-| `electrum_url` | (random from pool) | Electrum server URL. If not set, uses random server from pool. |
-| `min_confirmations` | `1` | Minimum confirmations required to spend UTXOs |
-
-### Default Electrum Server Pools
-
-Random server selection provides load balancing and resilience. A new server is selected each time a connection is established.
-
-| Network | Server Pool |
-|---------|-------------|
-| Mainnet | `electrum.blockstream.info`, `electrum.bitaroo.net`, `electrum.emzy.de` |
-| Testnet4 | `mempool.space`, `electrum.blockstream.info` |
-| Signet | (no default pool - requires explicit `electrum_url`) |
-
-To see the current pool:
-```bash
-vault read btc/config
-```
+---
 
 ## API Reference
 
-### Wallets
-
-#### List Wallets
-```
-LIST btc/wallets
-```
-
-#### Create Wallet
-```
-POST btc/wallets/:name
-```
-
-**Parameters:**
-- `description` (string) - Optional description
-- `address_type` (string) - Address type: `p2tr` (Taproot, default) or `p2wpkh` (SegWit)
-
-Creates a new wallet with 5 pre-generated addresses.
-
-**Response:**
-```json
-{
-  "name": "treasury",
-  "network": "mainnet",
-  "address_type": "p2tr",
-  "confirmed": 0,
-  "unconfirmed": 0,
-  "total": 0,
-  "address_count": 5,
-  "receive_address": "bc1p...",
-  "receive_index": 0,
-  "created_at": "2025-01-15T10:30:00Z"
-}
-```
-
-#### Get Wallet
-```
-GET btc/wallets/:name
-```
-
-Returns wallet info, balance, and a receive address. The receive address is the first unused address from the pre-generated pool. If all addresses have been used, `receive_address` will be `null` with a warning to generate more via `POST btc/wallets/:name/addresses`.
-
-**Response:**
-```json
-{
-  "name": "treasury",
-  "network": "mainnet",
-  "address_type": "p2tr",
-  "confirmed": 150000,
-  "unconfirmed": 0,
-  "total": 150000,
-  "address_count": 5,
-  "receive_address": "bc1p...",
-  "receive_index": 2,
-  "created_at": "2025-01-15T10:30:00Z"
-}
-```
-
-If no unused addresses are available:
-```json
-{
-  "receive_address": null,
-  "warning": "no unused address available - generate one with: vault write btc/wallets/treasury/addresses"
-}
-```
-
 All amounts are in satoshis (1 BTC = 100,000,000 satoshis).
 
-#### Delete Wallet
-```
-DELETE btc/wallets/:name
-```
+---
 
-> **Warning:** Deleting a wallet permanently destroys the seed. Ensure all funds are transferred first.
+### Configuration
 
-#### Export Extended Public Key (xpub)
-```
-GET btc/wallets/:name/xpub
-```
+#### `btc/config`
 
-Exports the account-level extended public key for watch-only wallet setup in external software like Sparrow.
+| Operation | Description |
+|-----------|-------------|
+| READ | Get current configuration |
+| CREATE/UPDATE | Set configuration |
+| DELETE | Remove configuration |
 
-**Response (Taproot wallet):**
-```json
-{
-  "xpub": "xpub6CUGRUonZSQ4TWtTMmzXdrXDtyPWKiKbKTYj7chH4jKgLAs2Z9RPcvnH7E1etVYmFPB...",
-  "format": "xpub",
-  "derivation_path": "m/86'/0'/0'",
-  "address_type": "p2tr",
-  "network": "mainnet",
-  "descriptor": "tr([fingerprint/86'/0'/0']xpub.../<0;1>/*)"
-}
-```
+**Parameters:**
 
-**Key formats by wallet type:**
-- `p2tr` mainnet: `xpub` (standard BIP86)
-- `p2tr` testnet: `tpub` (standard BIP86)
-- `p2wpkh` mainnet: `zpub` (SLIP-0132 BIP84)
-- `p2wpkh` testnet: `vpub` (SLIP-0132 BIP84)
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `network` | string | `mainnet` | Bitcoin network: `mainnet`, `testnet4`, or `signet` |
+| `electrum_url` | string | _(pool)_ | Electrum server URL (e.g., `ssl://electrum.blockstream.info:50002`). If not set, a random server from the default pool is used per connection. |
+| `min_confirmations` | int | `1` | Minimum confirmations required to spend UTXOs |
 
-**Watch-only wallet workflow:**
-1. Export the xpub: `vault read btc/wallets/my-wallet/xpub`
-2. Import into Sparrow as a watch-only wallet
-3. Use Sparrow to construct PSBTs
-4. Sign the PSBT via Vault: `vault write btc/wallets/my-wallet/psbt/sign psbt="..."`
-5. Broadcast the signed transaction
+**Default Server Pools:**
 
-> **Security Note:** The xpub allows deriving all addresses but cannot spend funds. Treat it as sensitive since it reveals your complete transaction history.
+| Network | Servers |
+|---------|---------|
+| mainnet | `ssl://electrum.blockstream.info:50002`, `ssl://electrum.bitaroo.net:50002`, `ssl://electrum.emzy.de:50002` |
+| testnet4 | `ssl://mempool.space:40002`, `ssl://electrum.blockstream.info:60002` |
+| signet | _(no default pool — requires explicit `electrum_url`)_ |
+
+---
+
+### Wallets
+
+#### `btc/wallets` — LIST
+
+Returns a list of all wallet names.
+
+#### `btc/wallets/:name`
+
+| Operation | Description |
+|-----------|-------------|
+| READ | Get wallet info, balance, and receive address |
+| CREATE | Create new wallet with HD seed (generates 5 initial addresses) |
+| UPDATE | Update wallet description |
+| DELETE | Delete wallet and all associated addresses |
+
+**Parameters (CREATE/UPDATE):**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `name` | string | _(required)_ | Wallet name |
+| `description` | string | | Optional description |
+| `address_type` | string | `p2tr` | Address type: `p2tr` (Taproot) or `p2wpkh` (Native SegWit) |
+
+**Response Fields (READ):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Wallet name |
+| `network` | string | Bitcoin network |
+| `address_type` | string | `p2tr` or `p2wpkh` |
+| `confirmed` | int | Confirmed balance in satoshis |
+| `unconfirmed` | int | Unconfirmed balance in satoshis |
+| `total` | int | Total balance (confirmed + unconfirmed) |
+| `address_count` | int | Number of generated addresses |
+| `receive_address` | string | Current unused receive address (null if none available) |
+| `receive_index` | int | Derivation index of receive address |
+| `created_at` | string | ISO 8601 timestamp |
+| `description` | string | Wallet description (if set) |
+| `warning` | string | Present if no unused address available |
 
 ---
 
 ### Addresses
 
-#### List Addresses
-```
-GET btc/wallets/:name/addresses
-```
+#### `btc/wallets/:name/addresses`
 
-Returns all generated addresses for the wallet.
+| Operation | Description |
+|-----------|-------------|
+| READ | List all addresses with balances and status |
+| CREATE/UPDATE | Generate unused addresses |
 
-**Response:**
-```json
-{
-  "wallet": "treasury",
-  "addresses": [
-    {
-      "address": "bc1p...",
-      "index": 0,
-      "derivation_path": "m/86'/0'/0'/0/0",
-      "spent": false
-    }
-  ],
-  "count": 1
-}
-```
+**Parameters (CREATE/UPDATE):**
 
-#### Generate Addresses
-```
-POST btc/wallets/:name/addresses
-```
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `count` | int | `1` | Number of unused addresses to return (max: 100) |
 
-Generate one or more unused addresses.
+**Response Fields (READ):**
 
-**Parameters:**
-- `count` (int) - Number of addresses to return (default: 1, max: 100)
+| Field | Type | Description |
+|-------|------|-------------|
+| `addresses` | array | List of address objects |
+| `address_count` | int | Total number of addresses |
+| `used_count` | int | Addresses with transaction history |
+| `unused_count` | int | Addresses without transaction history |
+| `total_confirmed` | int | Sum of all confirmed balances |
+| `total_unconfirmed` | int | Sum of all unconfirmed balances |
+| `total` | int | Total wallet balance |
 
-**Response:**
-```json
-{
-  "wallet": "treasury",
-  "addresses": [
-    {
-      "address": "bc1p...",
-      "index": 1,
-      "derivation_path": "m/86'/0'/0'/0/1"
-    }
-  ],
-  "count": 1,
-  "generated": 1
-}
-```
+**Address Object Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `address` | string | Bitcoin address |
+| `index` | int | Derivation index |
+| `derivation_path` | string | Full BIP84/86 derivation path |
+| `confirmed` | int | Confirmed balance |
+| `unconfirmed` | int | Unconfirmed balance |
+| `total` | int | Total balance |
+| `tx_count` | int | Number of transactions |
+| `used` | bool | Has transaction history |
+| `spent` | bool | Was used as a transaction input |
 
 ---
 
 ### UTXOs
 
-List all unspent transaction outputs for a wallet.
+#### `btc/wallets/:name/utxos`
 
-```
-GET btc/wallets/:name/utxos
-```
-
-**Parameters:**
-- `min_confirmations` (int) - Override config min_confirmations
-
-**Response:**
-```json
-{
-  "wallet": "treasury",
-  "utxos": [
-    {
-      "txid": "abc123...",
-      "vout": 0,
-      "value": 100000,
-      "address": "bc1p...",
-      "address_index": 0,
-      "confirmations": 6
-    }
-  ],
-  "count": 1,
-  "total_value": 100000
-}
-```
-
----
-
-### Consolidate
-
-Consolidate multiple UTXOs into a single UTXO. Useful for reducing future transaction fees and cleaning up dust.
-
-```
-POST btc/wallets/:name/consolidate
-```
+| Operation | Description |
+|-----------|-------------|
+| READ | List all unspent transaction outputs |
 
 **Parameters:**
-- `fee_rate` (int) - Fee rate in sat/vbyte (default: 10)
-- `min_confirmations` (int) - Override config min_confirmations
-- `below_value` (int) - Only consolidate UTXOs below this value in satoshis (default: 0 = all)
-- `dry_run` (bool) - Preview without broadcasting (default: false)
-- `compact` (bool) - Run compaction after consolidation (default: false)
 
-**Response:**
-```json
-{
-  "txid": "def456...",
-  "inputs_consolidated": 5,
-  "total_input": 50000,
-  "fee": 2900,
-  "output_value": 47100,
-  "output_address": "bc1p...",
-  "broadcast": true,
-  "privacy_warning": "Consolidation links all input addresses together, revealing common ownership"
-}
-```
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `min_confirmations` | int | `0` | Filter UTXOs by minimum confirmations |
 
-> **Privacy Warning:** Consolidation links all input addresses together via the common-input-ownership heuristic, revealing they are controlled by the same entity. Only consolidate when privacy implications are acceptable.
+**Response Fields:**
 
----
+| Field | Type | Description |
+|-------|------|-------------|
+| `utxos` | array | List of UTXO objects (sorted by value, largest first) |
+| `utxo_count` | int | Total number of UTXOs |
+| `total_value` | int | Sum of all UTXO values |
 
-### Compact
+**UTXO Object Fields:**
 
-Remove stored address records for addresses that are fully spent and empty. Since addresses can be regenerated from the wallet seed, there's no need to store records for addresses that will never be used again.
-
-```
-POST btc/wallets/:name/compact
-```
-
-**Response:**
-```json
-{
-  "previous_first_active": 0,
-  "new_first_active": 5,
-  "addresses_deleted": 5,
-  "addresses_remaining": 3
-}
-```
-
----
-
-### Scan
-
-Scan for funds on retired or untracked addresses. Two scan modes are available:
-
-- **Retired scan**: Check addresses below FirstActiveIndex that were compacted away
-- **Gap scan**: Check addresses beyond NextAddressIndex for deposits to untracked addresses
-
-```
-GET/POST btc/wallets/:name/scan
-```
-
-**Parameters:**
-- `retired` (bool) - Scan retired addresses below FirstActiveIndex (default: true)
-- `gap` (int) - Scan N addresses beyond NextAddressIndex (default: 0)
-- `sweep` (bool) - Move found retired funds to a fresh address (default: false)
-- `fee_rate` (int) - Fee rate for sweep transaction in sat/vbyte (default: 10)
-
-**Examples:**
-```bash
-# Scan retired addresses only
-vault read btc/wallets/my-wallet/scan
-
-# Scan 20 addresses ahead for untracked deposits
-vault read btc/wallets/my-wallet/scan gap=20
-
-# Scan both retired and ahead
-vault read btc/wallets/my-wallet/scan retired=true gap=20
-
-# Sweep found retired funds
-vault write btc/wallets/my-wallet/scan sweep=true
-```
-
-**Response (gap scan with found funds):**
-```json
-{
-  "gap_scanned": 20,
-  "gap_found": [
-    {
-      "address": "bc1p...",
-      "index": 50,
-      "confirmed": 10000,
-      "unconfirmed": 0,
-      "total": 10000
-    }
-  ],
-  "gap_total": 10000,
-  "gap_registered": [{"address": "bc1p...", "index": 50}],
-  "new_next_index": 51,
-  "total_found": 10000,
-  "message": "found: 10000 sats on 1 untracked (now registered)"
-}
-```
-
-Gap scan automatically registers found addresses and updates NextAddressIndex - no sweep needed. Funds stay in place.
-
-**Response (retired scan with sweep):**
-```json
-{
-  "retired_scanned": 5,
-  "retired_found": [...],
-  "retired_total": 10000,
-  "sweep_txid": "abc123...",
-  "sweep_address": "bc1p...",
-  "sweep_fee": 1540,
-  "sweep_output": 8460,
-  "sweep_broadcast": true,
-  "total_found": 10000
-}
-```
-
----
-
-### QR Code
-
-Get a QR code for the wallet's receive address.
-
-```
-GET btc/wallets/:name/qr
-```
-
-**Parameters:**
-- `size` (int) - QR code size in pixels (default: 256, range: 64-1024)
-- `format` (string) - `png` for base64 PNG, `ascii` for terminal display
-
-**Response (format=png):**
-```json
-{
-  "address": "bc1p...",
-  "uri": "bitcoin:bc1p...",
-  "qr_png": "iVBORw0KGgoAAAANSUhEUgAA..."
-}
-```
-
-**Response (format=ascii):**
-```json
-{
-  "address": "bc1p...",
-  "uri": "bitcoin:bc1p...",
-  "qr": "█████████████████████████████\n█████..."
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `txid` | string | Transaction ID |
+| `vout` | int | Output index |
+| `address` | string | Address owning this UTXO |
+| `address_index` | int | Derivation index of address |
+| `value` | int | Amount in satoshis |
+| `height` | int | Block height (0 if unconfirmed) |
+| `confirmations` | int | Number of confirmations |
 
 ---
 
 ### Send
 
-Send bitcoin from a wallet.
+#### `btc/wallets/:name/send`
 
-```
-POST btc/wallets/:name/send
-```
+| Operation | Description |
+|-----------|-------------|
+| CREATE/UPDATE | Create, sign, and broadcast a transaction |
 
 **Parameters:**
-- `to` (string, required) - Destination Bitcoin address
-- `amount` (int, required) - Amount in satoshis
-- `fee_rate` (int) - Fee rate in sat/vbyte (default: 10)
-- `min_confirmations` (int) - Override config min_confirmations
 
-**Response:**
-```json
-{
-  "txid": "abc123...",
-  "fee": 1410,
-  "amount": 50000,
-  "to": "bc1p...",
-  "change_amount": 98590,
-  "change_address": "bc1p...",
-  "broadcast": true
-}
-```
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `to` | string | _(required)_ | Destination Bitcoin address |
+| `amount` | int | _(required unless max_send)_ | Amount in satoshis |
+| `fee_rate` | int | `10` | Fee rate in sat/vbyte |
+| `min_confirmations` | int | _(from config)_ | Minimum UTXO confirmations |
+| `dry_run` | bool | `false` | Estimate fee without broadcasting |
+| `max_send` | bool | `false` | Send all available funds minus fee |
+
+**Response Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `txid` | string | Transaction ID |
+| `fee` | int | Fee paid in satoshis |
+| `amount` | int | Amount sent |
+| `to` | string | Destination address |
+| `change_amount` | int | Change amount (not present if max_send) |
+| `change_address` | string | Change address (not present if max_send) |
+| `broadcast` | bool | Whether transaction was broadcast |
+| `error` | string | Error message (if broadcast failed) |
+| `hex` | string | Raw transaction hex (if broadcast failed) |
+
+**Dry Run Response Fields (additional):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `dry_run` | bool | Always `true` |
+| `estimated_fee` | int | Estimated fee in satoshis |
+| `estimated_vsize` | int | Estimated transaction size in vbytes |
+| `inputs_used` | int | Number of UTXOs that would be spent |
+| `total_available` | int | Total available balance |
+| `max_send` | bool | Whether max_send was requested |
 
 ---
 
-### Fee Estimation
+### QR Code
 
-Estimate the fee for a potential send without broadcasting.
+#### `btc/wallets/:name/qr`
 
-```
-POST btc/wallets/:name/estimate
-```
+| Operation | Description |
+|-----------|-------------|
+| READ | Generate QR code for receive address |
 
 **Parameters:**
-- `to` (string, required) - Destination Bitcoin address
-- `amount` (int, required) - Amount in satoshis
-- `fee_rate` (int) - Fee rate in sat/vbyte (default: 10)
 
-**Response:**
-```json
-{
-  "amount": 50000,
-  "to": "bc1p...",
-  "fee_rate": 10,
-  "estimated_fee": 1410,
-  "estimated_vsize": 141,
-  "change_amount": 98590,
-  "inputs_used": 1,
-  "total_available": 150000,
-  "sufficient": true
-}
-```
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `size` | int | `256` | QR code size in pixels (range: 64–1024) |
+| `format` | string | `png` | Output format: `png` (base64) or `ascii` |
+
+**Response Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `address` | string | Receive address |
+| `uri` | string | BIP21 URI (`bitcoin:<address>`) |
+| `qr_png` | string | Base64-encoded PNG (if format=png) |
+| `qr` | string | ASCII art QR code (if format=ascii) |
+| `display_hint` | string | Command hint for ASCII display |
 
 ---
 
-### PSBT Operations
+### Extended Public Key
 
-PSBTs (Partially Signed Bitcoin Transactions) enable watch-only wallet workflows and multi-sig setups. Create PSBTs in external software (Sparrow, Caravan) and sign them with Vault.
+#### `btc/wallets/:name/xpub`
 
-#### Sign PSBT
+| Operation | Description |
+|-----------|-------------|
+| READ | Export account-level extended public key |
 
-```
-POST btc/wallets/:name/psbt/sign
-```
+**Response Fields:**
 
-**Parameters:**
-- `psbt` (string, required) - Base64-encoded PSBT
+| Field | Type | Description |
+|-------|------|-------------|
+| `xpub` | string | Extended public key |
+| `format` | string | Key format name |
+| `derivation_path` | string | BIP84/86 derivation path (e.g., `m/86'/0'/0'`) |
+| `address_type` | string | Wallet address type |
+| `network` | string | Bitcoin network |
+| `descriptor` | string | Output descriptor template for wallet import |
 
-**Response:**
-```json
-{
-  "psbt": "cHNidP8BAH0CAA...",
-  "inputs_total": 1,
-  "inputs_signed": 1
-}
-```
+**Key Format by Wallet Type:**
 
-#### Finalize and Broadcast PSBT
-
-```
-POST btc/wallets/:name/psbt/finalize
-```
-
-**Parameters:**
-- `psbt` (string, required) - Base64-encoded signed PSBT
-- `broadcast` (bool) - Whether to broadcast (default: true)
-
-**Response:**
-```json
-{
-  "txid": "abc123...",
-  "hex": "0200000001...",
-  "broadcast": true,
-  "broadcast_txid": "abc123..."
-}
-```
+| Address Type | Mainnet | Testnet |
+|--------------|---------|---------|
+| `p2tr` | `xpub` | `tpub` |
+| `p2wpkh` | `zpub` | `vpub` |
 
 ---
 
-### Multi-Sig Support
+### PSBT Sign
 
-Vault can participate as one signer in a multi-sig (m-of-n) setup. The recommended workflow uses Vault as a signing device while an external coordinator (Sparrow, Caravan, Nunchuk) manages the multi-sig wallet.
+#### `btc/wallets/:name/psbt/sign`
 
-#### Setup (One-Time)
+| Operation | Description |
+|-----------|-------------|
+| CREATE/UPDATE | Sign a PSBT with wallet keys |
 
-```bash
-# 1. Export xpub from Vault
-vault read btc/wallets/treasury/xpub
-# Returns: xpub6CUGRUonZSQ4T... (for Taproot wallet)
-# Or: zpub6rFR7y4Q2AijBE... (for p2wpkh wallet)
+**Parameters:**
 
-# 2. Export xpubs from other signers (Coldcard, Ledger, etc.)
-# 3. Import all xpubs into coordinator (Sparrow) to create multi-sig wallet
-# 4. Sparrow generates the multi-sig descriptor and addresses
-```
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `psbt` | string | _(required)_ | Base64-encoded PSBT |
 
-#### Spending from Multi-Sig
+**Response Fields:**
 
-```bash
-# 1. Create PSBT in Sparrow (or other coordinator)
-# 2. Export PSBT and sign with Vault
-vault write btc/wallets/treasury/psbt/sign psbt="cHNidP8BAH..."
-# Response shows inputs_signed: 1 (Vault's signature added)
+| Field | Type | Description |
+|-------|------|-------------|
+| `psbt` | string | Signed PSBT (base64) |
+| `inputs_total` | int | Total number of inputs in PSBT |
+| `inputs_signed` | int | Number of inputs signed by this wallet |
 
-# 3. Sign with other signers (Coldcard, Ledger, etc.)
-# 4. Once threshold met (e.g., 2-of-3), finalize in Sparrow or Vault:
-vault write btc/wallets/treasury/psbt/finalize psbt="cHNidP8..." broadcast=true
-```
-
-#### Supported Multi-Sig Types
-
-| Type | Script | Notes |
-|------|--------|-------|
-| P2WSH | Native SegWit multi-sig | Most common, lower fees |
-| P2SH-P2WSH | Wrapped SegWit | Legacy compatibility |
-
-> **Taproot Multi-Sig:** For `tr()` descriptors with script-path spends, the workflow is identical — Vault will sign compatible inputs via PSBT.
-
-The `/psbt/sign` endpoint automatically detects multi-sig inputs by:
-1. Matching BIP32 derivation paths in the PSBT
-2. Scanning witness scripts for pubkeys derived from the wallet
-
-#### Example: 2-of-3 Multi-Sig with Vault
-
-```
-Signer 1: Vault (xpub from vault read btc/wallets/treasury/xpub)
-Signer 2: Coldcard hardware wallet
-Signer 3: Ledger hardware wallet
-
-Coordinator: Sparrow (manages addresses, creates PSBTs)
-
-Spending requires any 2 of 3 signatures.
-```
+**Signing Strategies (tried in order):**
+1. Direct address match — single-sig P2WPKH/P2TR
+2. BIP32 derivation path matching — uses derivation paths in PSBT
+3. Witness script scanning — multi-sig P2WSH
 
 ---
 
-## Usage Examples
+### PSBT Finalize
 
-### Basic Workflow
+#### `btc/wallets/:name/psbt/finalize`
 
-```bash
-# Configure for testnet4
-vault write btc/config network=testnet4
+| Operation | Description |
+|-----------|-------------|
+| CREATE/UPDATE | Finalize a signed PSBT and optionally broadcast |
 
-# Create a wallet
-vault write btc/wallets/test description="Test wallet"
+**Parameters:**
 
-# Get wallet info (includes receive_address)
-vault read btc/wallets/test
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `psbt` | string | _(required)_ | Base64-encoded signed PSBT |
+| `broadcast` | bool | `true` | Whether to broadcast the transaction |
 
-# Estimate a send
-vault write btc/wallets/test/estimate \
-    to="tb1q..." \
-    amount=10000 \
-    fee_rate=5
+**Response Fields:**
 
-# Send bitcoin
-vault write btc/wallets/test/send \
-    to="tb1q..." \
-    amount=10000 \
-    fee_rate=5
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `txid` | string | Transaction ID |
+| `hex` | string | Raw transaction hex |
+| `broadcast` | bool | Whether transaction was broadcast |
+| `broadcast_txid` | string | Confirmed txid from broadcast (if successful) |
+| `error` | string | Error message (if broadcast failed) |
 
-### Watch-Only Wallet Workflow
+---
 
-For complex transactions (multi-output, custom fee control, coin selection), use an external wallet like Sparrow:
+### Consolidate
 
-```bash
-# 1. Export xpub from Vault
-vault read btc/wallets/treasury/xpub
+#### `btc/wallets/:name/consolidate`
 
-# 2. Import xpub into Sparrow as watch-only wallet
-# 3. Create transaction in Sparrow (multi-output, custom fees, etc.)
-# 4. Export PSBT from Sparrow
+| Operation | Description |
+|-----------|-------------|
+| CREATE/UPDATE | Consolidate multiple UTXOs into one |
 
-# 5. Sign the PSBT with Vault
-vault write btc/wallets/treasury/psbt/sign \
-    psbt="cHNidP8..."
+**Parameters:**
 
-# 6. Finalize and broadcast
-vault write btc/wallets/treasury/psbt/finalize \
-    psbt="cHNidP8..." \
-    broadcast=true
-```
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `fee_rate` | int | `10` | Fee rate in sat/vbyte |
+| `min_confirmations` | int | _(from config)_ | Minimum UTXO confirmations |
+| `below_value` | int | `0` | Only consolidate UTXOs below this value (0 = all) |
+| `dry_run` | bool | `false` | Preview without broadcasting |
+| `compact` | bool | `false` | Run compaction after consolidation |
 
-### Vault Policies
+**Response Fields:**
 
-Read-only policy:
-```hcl
-path "btc/wallets" {
-  capabilities = ["list"]
-}
+| Field | Type | Description |
+|-------|------|-------------|
+| `txid` | string | Transaction ID (if broadcast) |
+| `inputs_consolidated` | int | Number of UTXOs consolidated |
+| `total_input` | int | Total value of inputs |
+| `fee` | int | Transaction fee |
+| `output_value` | int | Value of consolidated UTXO |
+| `output_address` | string | Address receiving consolidated funds |
+| `broadcast` | bool | Whether transaction was broadcast |
+| `privacy_warning` | string | Warning about address linking |
+| `dry_run` | bool | Present if dry_run=true |
+| `estimated_fee` | int | Estimated fee (dry_run only) |
+| `estimated_vsize` | int | Estimated vsize (dry_run only) |
+| `compact_addresses_deleted` | int | Addresses deleted (if compact=true) |
+| `compact_new_first_active` | int | New first active index (if compact=true) |
 
-path "btc/wallets/*" {
-  capabilities = ["read"]
-}
-```
+> **Privacy Warning:** Consolidation links all input addresses together via the common-input-ownership heuristic.
 
-Full access policy:
-```hcl
-path "btc/*" {
-  capabilities = ["create", "read", "update", "delete", "list"]
-}
-```
+---
 
-## Architecture
+### Compact
 
-### Key Derivation
+#### `btc/wallets/:name/compact`
 
-The plugin supports two address types with different BIP derivation paths:
+| Operation | Description |
+|-----------|-------------|
+| CREATE/UPDATE | Remove spent empty address records |
 
-**BIP86 - Taproot (P2TR)** - Default for new wallets
-```
-m / 86' / coin_type' / account' / change / address_index
-```
+**Response Fields:**
 
-**BIP84 - Native SegWit (P2WPKH)**
-```
-m / 84' / coin_type' / account' / change / address_index
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `previous_first_active` | int | Previous lowest tracked index |
+| `new_first_active` | int | New lowest tracked index |
+| `addresses_deleted` | int | Number of records removed |
+| `addresses_remaining` | int | Number of records remaining |
 
-| Component | Value | Description |
-|-----------|-------|-------------|
-| Purpose | 86' or 84' | Taproot or Native SegWit |
-| Coin Type | 0' or 1' | Mainnet or Testnet4/Signet |
-| Account | 0' | Single account per wallet |
-| Change | 0 or 1 | External (receiving) or Internal (change) |
-| Address Index | 0+ | Sequential index |
+---
 
-### Address Types
+### Scan
 
-| Type | Prefix | BIP | Example |
-|------|--------|-----|---------|
-| P2TR (Taproot) | `bc1p` / `tb1p` | BIP86 | `bc1p5d7rjq7g6rd...` |
-| P2WPKH (SegWit) | `bc1q` / `tb1q` | BIP84 | `bc1qcr8te4kr609...` |
+#### `btc/wallets/:name/scan`
 
-Taproot addresses use Schnorr signatures and offer:
-- Improved privacy (key-path spends look identical)
-- Slightly smaller transactions
-- Future script flexibility
+| Operation | Description |
+|-----------|-------------|
+| READ/CREATE/UPDATE | Scan for funds on retired or untracked addresses |
 
-### Address Reuse Prevention
+**Parameters:**
 
-The plugin automatically prevents address reuse:
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `retired` | bool | `true` | Scan addresses below FirstActiveIndex |
+| `gap` | int | `0` | Scan N addresses beyond NextAddressIndex |
+| `sweep` | bool | `false` | Sweep found retired funds to fresh address |
+| `fee_rate` | int | `10` | Fee rate for sweep (sat/vbyte) |
 
-1. **Initial Pool**: Wallet creation generates 5 addresses upfront
-2. **Spent Tracking**: Addresses used as transaction inputs are marked as spent
-3. **History Check**: Addresses with any transaction history are not reused for receiving
-4. **Explicit Generation**: Use `POST btc/wallets/:name/addresses` to generate more addresses when needed
+**Response Fields:**
 
-Reading a wallet returns `receive_address` - the first unused address from the pool. If all addresses have been used, it returns `null` with a hint to generate more. This follows REST conventions where read operations never cause writes.
+| Field | Type | Description |
+|-------|------|-------------|
+| `retired_scanned` | int | Number of retired addresses scanned |
+| `retired_found` | array | Retired addresses with funds |
+| `retired_total` | int | Total satoshis on retired addresses |
+| `gap_scanned` | int | Number of gap addresses scanned |
+| `gap_found` | array | Untracked addresses with funds |
+| `gap_total` | int | Total satoshis on untracked addresses |
+| `gap_registered` | array | Addresses registered from gap scan |
+| `new_next_index` | int | Updated NextAddressIndex |
+| `sweep_txid` | string | Sweep transaction ID |
+| `sweep_fee` | int | Sweep transaction fee |
+| `sweep_output` | int | Sweep output value |
+| `sweep_address` | string | Sweep destination address |
+| `sweep_broadcast` | bool | Whether sweep was broadcast |
+| `sweep_error` | string | Sweep error (if failed) |
+| `total_found` | int | Combined total from both scans |
+| `message` | string | Summary message |
 
-### Storage
+---
 
-| Path | Contents | Encryption |
-|------|----------|------------|
-| `config` | Electrum URL, network, settings | Seal-wrapped |
-| `wallets/:name` | Seed, address index, metadata | Seal-wrapped |
-| `addresses/:wallet/:index` | Address, scripthash, path | Standard |
+## Multi-Sig Workflow
 
-## Security
+Vault can participate as one signer in a multi-sig setup:
 
-- **Seed Encryption**: Seeds are stored with Vault's seal-wrap encryption
-- **No Key Export**: Private keys and seeds cannot be exported via API
-- **TLS Communication**: All Electrum connections use TLS
-- **Address Reuse Prevention**: Automatic address lifecycle management
+1. Export xpub from Vault
+2. Create multi-sig wallet in Sparrow/Caravan with Vault's xpub + other signers
+3. Create PSBT in the coordinator when spending
+4. Sign with Vault via `/psbt/sign`
+5. Collect signatures from other signers
+6. Finalize and broadcast when threshold is met
 
-## Development
+**Supported multi-sig types:**
+- P2WSH (Native SegWit multi-sig)
+- P2SH-P2WSH (Wrapped SegWit)
+- Taproot (`tr()` descriptors with script-path spends)
 
-### Project Structure
+---
 
-```
-vault-plugin-btc/
-├── cmd/vault-plugin-btc/main.go
-├── backend.go              # Backend factory, client management
-├── cache.go                # Address/balance caching
-├── path_config.go          # Configuration endpoint
-├── path_wallets.go         # Wallet CRUD, balance, receive address
-├── path_wallet_addresses.go # Address listing and generation
-├── path_wallet_utxos.go    # UTXO listing
-├── path_wallet_qr.go       # QR code generation
-├── path_wallet_send.go     # Send and fee estimation
-├── path_wallet_psbt.go     # PSBT operations
-├── path_wallet_consolidate.go # UTXO consolidation
-├── path_wallet_compact.go  # Address record cleanup
-├── path_wallet_scan.go     # Retired address scanning
-├── address_storage.go      # Address persistence
-├── utxo.go                 # UTXO fetching helpers
-├── electrum/client.go      # Electrum protocol client
-├── wallet/
-│   ├── keys.go             # HD key derivation (BIP84/BIP86)
-│   ├── address.go          # Address generation (P2WPKH/P2TR)
-│   └── transaction.go      # Transaction building and signing
-└── Makefile
-```
+## Watch-Only Wallet Workflow
 
-### Building
+For complex transactions (multi-output, custom coin selection), use an external wallet:
 
-```bash
-make build    # Build the plugin
-make test     # Run tests
-make dev      # Start Vault in dev mode
-make enable   # Enable the plugin
-```
+1. Export xpub from Vault
+2. Import into Sparrow as watch-only wallet
+3. Create transaction in Sparrow
+4. Export PSBT from Sparrow
+5. Sign via `/psbt/sign`
+6. Finalize via `/psbt/finalize`
+
+---
 
 ## License
 
-MIT License
+MIT

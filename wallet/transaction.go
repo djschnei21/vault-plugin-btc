@@ -375,8 +375,9 @@ func EstimateTransactionFee(numInputs, numOutputs int, feeRate int64) int64 {
 	return estimateFee(numInputs, numOutputs, feeRate)
 }
 
-// BuildConsolidationTransaction creates a transaction that consolidates multiple UTXOs
-// into a single output. All input value (minus fee) goes to the destination address.
+// BuildConsolidationTransaction creates a transaction that sends all UTXO value
+// to a single output. All input value (minus fee) goes to the destination address.
+// Used for both UTXO consolidation and max_send operations.
 func BuildConsolidationTransaction(
 	seed []byte,
 	network string,
@@ -384,8 +385,8 @@ func BuildConsolidationTransaction(
 	destinationAddress string,
 	feeRate int64,
 ) (*TransactionResult, error) {
-	if len(utxos) < 2 {
-		return nil, fmt.Errorf("need at least 2 UTXOs to consolidate, got %d", len(utxos))
+	if len(utxos) < 1 {
+		return nil, fmt.Errorf("need at least 1 UTXO, got %d", len(utxos))
 	}
 
 	params, err := NetworkParams(network)
