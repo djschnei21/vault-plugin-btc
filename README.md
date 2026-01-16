@@ -45,10 +45,10 @@ All amounts are in satoshis (1 BTC = 100,000,000 satoshis).
 
 #### `btc/config`
 
-| Operation | Description |
-|-----------|-------------|
-| READ | Get current configuration |
-| CREATE/UPDATE | Set configuration |
+| Method | Description |
+|--------|-------------|
+| GET | Get current configuration |
+| POST | Set configuration |
 | DELETE | Remove configuration |
 
 **Parameters:**
@@ -67,24 +67,41 @@ All amounts are in satoshis (1 BTC = 100,000,000 satoshis).
 | testnet4 | `ssl://mempool.space:40002`, `ssl://electrum.blockstream.info:60002` |
 | signet | _(no default pool — requires explicit `electrum_url`)_ |
 
+**Examples:**
+
+```bash
+# Configure for testnet4
+vault write btc/config network=testnet4
+
+# Configure for mainnet with specific Electrum server
+vault write btc/config network=mainnet electrum_url=ssl://electrum.blockstream.info:50002
+
+# Allow spending unconfirmed UTXOs
+vault write btc/config min_confirmations=0
+
+# Read current configuration
+vault read btc/config
+```
+
 ---
 
 ### Wallets
 
-#### `btc/wallets` — LIST
+#### `btc/wallets`
 
-Returns a list of all wallet names.
+| Method | Description |
+|--------|-------------|
+| LIST | Returns all wallet names |
 
 #### `btc/wallets/:name`
 
-| Operation | Description |
-|-----------|-------------|
-| READ | Get wallet info, balance, and receive address |
-| CREATE | Create new wallet with HD seed (generates 5 initial addresses) |
-| UPDATE | Update wallet description |
+| Method | Description |
+|--------|-------------|
+| GET | Get wallet info, balance, and receive address |
+| POST | Create new wallet or update description |
 | DELETE | Delete wallet and all associated addresses |
 
-**Parameters (CREATE/UPDATE):**
+**Parameters (POST):**
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
@@ -92,7 +109,7 @@ Returns a list of all wallet names.
 | `description` | string | | Optional description |
 | `address_type` | string | `p2tr` | Address type: `p2tr` (Taproot) or `p2wpkh` (Native SegWit) |
 
-**Response Fields (READ):**
+**Response Fields (GET):**
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -109,24 +126,43 @@ Returns a list of all wallet names.
 | `description` | string | Wallet description (if set) |
 | `warning` | string | Present if no unused address available |
 
+**Examples:**
+
+```bash
+# List all wallets
+vault list btc/wallets
+
+# Create a Taproot wallet (default)
+vault write btc/wallets/treasury description="Cold storage"
+
+# Create a Native SegWit wallet
+vault write btc/wallets/legacy address_type=p2wpkh
+
+# Get wallet info and current receive address
+vault read btc/wallets/treasury
+
+# Delete a wallet
+vault delete btc/wallets/old-wallet
+```
+
 ---
 
 ### Addresses
 
 #### `btc/wallets/:name/addresses`
 
-| Operation | Description |
-|-----------|-------------|
-| READ | List all addresses with balances and status |
-| CREATE/UPDATE | Generate unused addresses |
+| Method | Description |
+|--------|-------------|
+| GET | List all addresses with balances and status |
+| POST | Generate unused addresses |
 
-**Parameters (CREATE/UPDATE):**
+**Parameters (POST):**
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `count` | int | `1` | Number of unused addresses to return (max: 100) |
 
-**Response Fields (READ):**
+**Response Fields (GET):**
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -152,15 +188,25 @@ Returns a list of all wallet names.
 | `used` | bool | Has transaction history |
 | `spent` | bool | Was used as a transaction input |
 
+**Examples:**
+
+```bash
+# List all addresses with balances
+vault read btc/wallets/treasury/addresses
+
+# Generate 10 new receive addresses
+vault write btc/wallets/treasury/addresses count=10
+```
+
 ---
 
 ### UTXOs
 
 #### `btc/wallets/:name/utxos`
 
-| Operation | Description |
-|-----------|-------------|
-| READ | List all unspent transaction outputs |
+| Method | Description |
+|--------|-------------|
+| GET | List all unspent transaction outputs |
 
 **Parameters:**
 
@@ -188,15 +234,28 @@ Returns a list of all wallet names.
 | `height` | int | Block height (0 if unconfirmed) |
 | `confirmations` | int | Number of confirmations |
 
+**Examples:**
+
+```bash
+# List all UTXOs
+vault read btc/wallets/treasury/utxos
+
+# List only confirmed UTXOs (1+ confirmations)
+vault read btc/wallets/treasury/utxos min_confirmations=1
+
+# List UTXOs with 6+ confirmations
+vault read btc/wallets/treasury/utxos min_confirmations=6
+```
+
 ---
 
 ### Send
 
 #### `btc/wallets/:name/send`
 
-| Operation | Description |
-|-----------|-------------|
-| CREATE/UPDATE | Create, sign, and broadcast a transaction |
+| Method | Description |
+|--------|-------------|
+| POST | Create, sign, and broadcast a transaction |
 
 **Parameters:**
 
@@ -234,15 +293,53 @@ Returns a list of all wallet names.
 | `total_available` | int | Total available balance |
 | `max_send` | bool | Whether max_send was requested |
 
+**Examples:**
+
+```bash
+# Send 50,000 sats
+vault write btc/wallets/treasury/send \
+  to=bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq \
+  amount=50000
+
+# Estimate fee before sending (dry run)
+vault write btc/wallets/treasury/send \
+  to=bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq \
+  amount=50000 \
+  dry_run=true
+
+# Send with higher fee rate (20 sat/vbyte)
+vault write btc/wallets/treasury/send \
+  to=bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq \
+  amount=50000 \
+  fee_rate=20
+
+# Send all funds (sweep wallet)
+vault write btc/wallets/treasury/send \
+  to=bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq \
+  max_send=true
+
+# Estimate max send amount
+vault write btc/wallets/treasury/send \
+  to=bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq \
+  max_send=true \
+  dry_run=true
+
+# Include unconfirmed UTXOs in send
+vault write btc/wallets/treasury/send \
+  to=bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq \
+  amount=50000 \
+  min_confirmations=0
+```
+
 ---
 
 ### QR Code
 
 #### `btc/wallets/:name/qr`
 
-| Operation | Description |
-|-----------|-------------|
-| READ | Generate QR code for receive address |
+| Method | Description |
+|--------|-------------|
+| GET | Generate QR code for receive address |
 
 **Parameters:**
 
@@ -261,15 +358,28 @@ Returns a list of all wallet names.
 | `qr` | string | ASCII art QR code (if format=ascii) |
 | `display_hint` | string | Command hint for ASCII display |
 
+**Examples:**
+
+```bash
+# Get QR code as base64 PNG
+vault read btc/wallets/treasury/qr
+
+# Display ASCII QR code in terminal
+vault read -field=qr btc/wallets/treasury/qr format=ascii
+
+# Get larger QR code (512px)
+vault read btc/wallets/treasury/qr size=512
+```
+
 ---
 
 ### Extended Public Key
 
 #### `btc/wallets/:name/xpub`
 
-| Operation | Description |
-|-----------|-------------|
-| READ | Export account-level extended public key |
+| Method | Description |
+|--------|-------------|
+| GET | Export account-level extended public key |
 
 **Response Fields:**
 
@@ -289,15 +399,28 @@ Returns a list of all wallet names.
 | `p2tr` | `xpub` | `tpub` |
 | `p2wpkh` | `zpub` | `vpub` |
 
+**Examples:**
+
+```bash
+# Export xpub for watch-only wallet setup
+vault read btc/wallets/treasury/xpub
+
+# Get just the xpub string
+vault read -field=xpub btc/wallets/treasury/xpub
+
+# Get the output descriptor for Sparrow import
+vault read -field=descriptor btc/wallets/treasury/xpub
+```
+
 ---
 
 ### PSBT Sign
 
 #### `btc/wallets/:name/psbt/sign`
 
-| Operation | Description |
-|-----------|-------------|
-| CREATE/UPDATE | Sign a PSBT with wallet keys |
+| Method | Description |
+|--------|-------------|
+| POST | Sign a PSBT with wallet keys |
 
 **Parameters:**
 
@@ -318,15 +441,27 @@ Returns a list of all wallet names.
 2. BIP32 derivation path matching — uses derivation paths in PSBT
 3. Witness script scanning — multi-sig P2WSH
 
+**Examples:**
+
+```bash
+# Sign a PSBT from Sparrow or other wallet software
+vault write btc/wallets/treasury/psbt/sign \
+  psbt="cHNidP8BAH0CAAAAAb..."
+
+# Sign and capture the signed PSBT for further processing
+SIGNED=$(vault write -field=psbt btc/wallets/treasury/psbt/sign \
+  psbt="cHNidP8BAH0CAAAAAb...")
+```
+
 ---
 
 ### PSBT Finalize
 
 #### `btc/wallets/:name/psbt/finalize`
 
-| Operation | Description |
-|-----------|-------------|
-| CREATE/UPDATE | Finalize a signed PSBT and optionally broadcast |
+| Method | Description |
+|--------|-------------|
+| POST | Finalize a signed PSBT and optionally broadcast |
 
 **Parameters:**
 
@@ -345,15 +480,33 @@ Returns a list of all wallet names.
 | `broadcast_txid` | string | Confirmed txid from broadcast (if successful) |
 | `error` | string | Error message (if broadcast failed) |
 
+**Examples:**
+
+```bash
+# Finalize and broadcast a signed PSBT
+vault write btc/wallets/treasury/psbt/finalize \
+  psbt="cHNidP8BAH0CAAAAAb..."
+
+# Finalize without broadcasting (get raw hex)
+vault write btc/wallets/treasury/psbt/finalize \
+  psbt="cHNidP8BAH0CAAAAAb..." \
+  broadcast=false
+
+# Get just the transaction hex
+vault write -field=hex btc/wallets/treasury/psbt/finalize \
+  psbt="cHNidP8BAH0CAAAAAb..." \
+  broadcast=false
+```
+
 ---
 
 ### Consolidate
 
 #### `btc/wallets/:name/consolidate`
 
-| Operation | Description |
-|-----------|-------------|
-| CREATE/UPDATE | Consolidate multiple UTXOs into one |
+| Method | Description |
+|--------|-------------|
+| POST | Consolidate multiple UTXOs into one |
 
 **Parameters:**
 
@@ -385,15 +538,34 @@ Returns a list of all wallet names.
 
 > **Privacy Warning:** Consolidation links all input addresses together via the common-input-ownership heuristic.
 
+**Examples:**
+
+```bash
+# Preview consolidation (dry run)
+vault write btc/wallets/treasury/consolidate dry_run=true
+
+# Consolidate all UTXOs
+vault write btc/wallets/treasury/consolidate
+
+# Consolidate only small UTXOs (dust cleanup)
+vault write btc/wallets/treasury/consolidate below_value=10000
+
+# Consolidate with low fee rate
+vault write btc/wallets/treasury/consolidate fee_rate=1
+
+# Consolidate and compact address records
+vault write btc/wallets/treasury/consolidate compact=true
+```
+
 ---
 
 ### Compact
 
 #### `btc/wallets/:name/compact`
 
-| Operation | Description |
-|-----------|-------------|
-| CREATE/UPDATE | Remove spent empty address records |
+| Method | Description |
+|--------|-------------|
+| POST | Remove spent empty address records |
 
 **Response Fields:**
 
@@ -404,15 +576,22 @@ Returns a list of all wallet names.
 | `addresses_deleted` | int | Number of records removed |
 | `addresses_remaining` | int | Number of records remaining |
 
+**Examples:**
+
+```bash
+# Remove spent empty address records
+vault write btc/wallets/treasury/compact
+```
+
 ---
 
 ### Scan
 
 #### `btc/wallets/:name/scan`
 
-| Operation | Description |
-|-----------|-------------|
-| READ/CREATE/UPDATE | Scan for funds on retired or untracked addresses |
+| Method | Description |
+|--------|-------------|
+| GET/POST | Scan for funds on retired or untracked addresses |
 
 **Parameters:**
 
@@ -444,6 +623,22 @@ Returns a list of all wallet names.
 | `total_found` | int | Combined total from both scans |
 | `message` | string | Summary message |
 
+**Examples:**
+
+```bash
+# Scan for funds on retired (compacted) addresses
+vault read btc/wallets/treasury/scan
+
+# Scan 20 addresses beyond current index (gap scan)
+vault write btc/wallets/treasury/scan gap=20
+
+# Sweep any found retired funds to a fresh address
+vault write btc/wallets/treasury/scan sweep=true
+
+# Scan both retired and gap addresses
+vault write btc/wallets/treasury/scan retired=true gap=10
+```
+
 ---
 
 ## Multi-Sig Workflow
@@ -462,6 +657,21 @@ Vault can participate as one signer in a multi-sig setup:
 - P2SH-P2WSH (Wrapped SegWit)
 - Taproot (`tr()` descriptors with script-path spends)
 
+```bash
+# 1. Export xpub for multi-sig coordinator
+vault read -field=xpub btc/wallets/treasury/xpub
+
+# 2-3. Create multi-sig wallet and PSBT in Sparrow/Caravan...
+
+# 4. Sign the PSBT with Vault
+vault write btc/wallets/treasury/psbt/sign psbt="cHNidP8BAH..."
+
+# 5. Collect other signatures externally...
+
+# 6. Finalize and broadcast when all signatures collected
+vault write btc/wallets/treasury/psbt/finalize psbt="cHNidP8BAH..."
+```
+
 ---
 
 ## Watch-Only Wallet Workflow
@@ -474,6 +684,20 @@ For complex transactions (multi-output, custom coin selection), use an external 
 4. Export PSBT from Sparrow
 5. Sign via `/psbt/sign`
 6. Finalize via `/psbt/finalize`
+
+```bash
+# 1. Export xpub and descriptor for Sparrow
+vault read btc/wallets/treasury/xpub
+
+# 2-4. Import into Sparrow, create and export PSBT...
+
+# 5. Sign the PSBT
+SIGNED=$(vault write -field=psbt btc/wallets/treasury/psbt/sign \
+  psbt="cHNidP8BAH...")
+
+# 6. Finalize and broadcast
+vault write btc/wallets/treasury/psbt/finalize psbt="$SIGNED"
+```
 
 ---
 
