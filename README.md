@@ -7,10 +7,12 @@ A HashiCorp Vault secrets engine plugin for Bitcoin custodial operations. Each w
 - **HD Wallet Management** - BIP84/BIP86 hierarchical deterministic wallets with secure seed storage
 - **Taproot Support** - Default `bc1p...` (P2TR) addresses with Schnorr signatures, or legacy `bc1q...` (P2WPKH)
 - **Automatic Address Reuse Prevention** - Tracks spent addresses and prevents receiving to previously-used addresses
-- **Simple Send/Receive** - Streamlined API for common operations
+- **Simple Send/Receive** - Streamlined API for common custodial operations
+- **Watch-Only Wallet Coordination** - Export xpubs for use with Sparrow, Caravan, or other wallet software
+- **PSBT Signing** - Sign PSBTs created by external wallets for complex transactions
+- **Multi-Sig Support** - Participate as one signer in multi-sig setups with external coordinators
 - **Fee Estimation** - Preview transaction fees before sending
 - **UTXO Management** - List, consolidate, and manage UTXOs with privacy warnings
-- **PSBT Support** - Create, sign, and finalize PSBTs for complex transactions
 - **Multi-Network Support** - Mainnet, Testnet4, and custom Signet configurations
 - **Automatic Reconnection** - Recovers gracefully from stale Electrum connections
 
@@ -677,19 +679,23 @@ vault write btc/wallets/test/send \
     fee_rate=5
 ```
 
-### Multi-Output Transaction with PSBT
+### Watch-Only Wallet Workflow
+
+For complex transactions (multi-output, custom fee control, coin selection), use an external wallet like Sparrow:
 
 ```bash
-# Create PSBT with multiple outputs
-vault write btc/wallets/treasury/psbt/create \
-    outputs='[{"address":"bc1q...","amount":50000},{"address":"bc1q...","amount":30000}]' \
-    fee_rate=10
+# 1. Export xpub from Vault
+vault read btc/wallets/treasury/xpub
 
-# Sign the PSBT
+# 2. Import xpub into Sparrow as watch-only wallet
+# 3. Create transaction in Sparrow (multi-output, custom fees, etc.)
+# 4. Export PSBT from Sparrow
+
+# 5. Sign the PSBT with Vault
 vault write btc/wallets/treasury/psbt/sign \
     psbt="cHNidP8..."
 
-# Finalize and broadcast
+# 6. Finalize and broadcast
 vault write btc/wallets/treasury/psbt/finalize \
     psbt="cHNidP8..." \
     broadcast=true
