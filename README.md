@@ -1,6 +1,11 @@
 # Vault Plugin: Bitcoin Secrets Engine
 
-A HashiCorp Vault secrets engine plugin for Bitcoin custodial operations. Each wallet is an HD wallet with secure key storage, automatic address management, and PSBT support for complex transactions.
+[![Go Report Card](https://goreportcard.com/badge/github.com/djschnei21/vault-plugin-btc)](https://goreportcard.com/report/github.com/djschnei21/vault-plugin-btc)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+https://github.com/djschnei21/vault-plugin-btc
+
+A HashiCorp Vault secrets engine plugin for Bitcoin custodial operations. Lightweight Electrum-based backend (no full node required), modern Taproot default, and built for secure signing workflows — from simple sends to multi-sig coordination with external wallets.
 
 ## Features
 
@@ -18,6 +23,8 @@ A HashiCorp Vault secrets engine plugin for Bitcoin custodial operations. Each w
 
 ## Quick Start
 
+### Setup
+
 ```bash
 # Build the plugin
 make build
@@ -31,56 +38,81 @@ export VAULT_TOKEN='root'
 make enable
 ```
 
-### Configure for Testnet4 (Recommended for Testing)
+### Network Configuration
 
+**Testnet4** (recommended for testing):
 ```bash
-# Configure for testnet4 (uses random server from pool)
 vault write btc/config network=testnet4
-
-# Create a wallet (Taproot by default, 5 addresses pre-generated)
-vault write btc/wallets/test description="Test wallet"
-
-# Get receive address, fund it from a faucet
-vault read btc/wallets/test
-
-# Check balance after funding
-vault read btc/wallets/test
 ```
 
-### Configure for Mainnet
+**Mainnet**:
+```bash
+vault write btc/config network=mainnet
+```
+
+**Custom Electrum server** (optional):
+```bash
+vault write btc/config network=mainnet electrum_url="ssl://your-server:50002"
+```
+
+| Network | Default Server Pool |
+|---------|---------------------|
+| Mainnet | `electrum.blockstream.info`, `electrum.bitaroo.net`, `electrum.emzy.de` |
+| Testnet4 | `mempool.space`, `electrum.blockstream.info` |
+| Signet | (requires explicit `electrum_url`) |
+
+### Walkthrough
 
 ```bash
-# Configure for mainnet (uses random server from pool)
-vault write btc/config network=mainnet
+# Create a wallet (Taproot by default)
+vault write btc/wallets/demo description="Demo wallet"
 
-# Create a wallet
-vault write btc/wallets/treasury description="Main treasury"
+# View wallet info and receive address
+vault read btc/wallets/demo
 
-# For SegWit addresses instead of Taproot
-vault write btc/wallets/legacy address_type=p2wpkh
+# Generate QR code for receiving (ASCII for terminal)
+vault read btc/wallets/demo/qr format=ascii -format=json | jq -r '.data.qr'
 
-# Get wallet info, balance, and receive address
-vault read btc/wallets/treasury
+# List addresses
+vault read btc/wallets/demo/addresses
+
+# Generate more addresses
+vault write btc/wallets/demo/addresses count=3
+
+# Check UTXOs after receiving funds
+vault read btc/wallets/demo/utxos
+
+# Estimate a send
+vault write btc/wallets/demo/estimate to="tb1p..." amount=10000 fee_rate=5
 
 # Send bitcoin
-vault write btc/wallets/treasury/send to="bc1p..." amount=50000
+vault write btc/wallets/demo/send to="tb1p..." amount=10000 fee_rate=5
+
+# Consolidate UTXOs (reduces future fees)
+vault write btc/wallets/demo/consolidate fee_rate=2 dry_run=true  # preview
+vault write btc/wallets/demo/consolidate fee_rate=2               # execute
+
+# Compact spent addresses (cleanup)
+vault write btc/wallets/demo/compact
+
+# Scan for funds on retired addresses
+vault read btc/wallets/demo/scan
+
+# Export xpub for watch-only wallet setup
+vault read btc/wallets/demo/xpub
+
+# List all wallets
+vault list btc/wallets
 ```
 
-### Electrum Server Pools
+### SegWit Wallets
 
-Servers are randomly selected from the pool per connection. To use a specific server:
-
+For legacy `bc1q...` addresses instead of Taproot:
 ```bash
-vault write btc/config network=mainnet electrum_url="ssl://electrum.blockstream.info:50002"
+vault write btc/wallets/legacy address_type=p2wpkh
 ```
 
-| Network | Servers in Pool |
-|---------|-----------------|
-| Mainnet | `electrum.blockstream.info:50002`, `electrum.bitaroo.net:50002`, `electrum.emzy.de:50002` |
-| Testnet4 | `mempool.space:40002`, `electrum.blockstream.info:60002` |
-| Signet | (no default - requires explicit `electrum_url`) |
-
-> **Note:** For production use, consider running your own Electrum server for privacy and reliability.
+> **Note:** For production, consider running your own Electrum server for privacy and reliability.
 
 ## Installation
 
@@ -173,7 +205,7 @@ Creates a new wallet with 5 pre-generated addresses.
   "address_count": 5,
   "receive_address": "bc1p...",
   "receive_index": 0,
-  "created_at": "2024-01-15T10:30:00Z"
+  "created_at": "2025-01-15T10:30:00Z"
 }
 ```
 
@@ -196,7 +228,7 @@ Returns wallet info, balance, and a receive address. The receive address is the 
   "address_count": 5,
   "receive_address": "bc1p...",
   "receive_index": 2,
-  "created_at": "2024-01-15T10:30:00Z"
+  "created_at": "2025-01-15T10:30:00Z"
 }
 ```
 
@@ -224,23 +256,23 @@ GET btc/wallets/:name/xpub
 
 Exports the account-level extended public key for watch-only wallet setup in external software like Sparrow.
 
-**Response:**
+**Response (Taproot wallet):**
 ```json
 {
-  "xpub": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
-  "format": "zpub",
-  "derivation_path": "m/84'/0'/0'",
-  "address_type": "p2wpkh",
+  "xpub": "xpub6CUGRUonZSQ4TWtTMmzXdrXDtyPWKiKbKTYj7chH4jKgLAs2Z9RPcvnH7E1etVYmFPB...",
+  "format": "xpub",
+  "derivation_path": "m/86'/0'/0'",
+  "address_type": "p2tr",
   "network": "mainnet",
-  "descriptor": "wpkh([fingerprint/84'/0'/0']zpub.../&lt;0;1&gt;/*)"
+  "descriptor": "tr([fingerprint/86'/0'/0']xpub.../<0;1>/*)"
 }
 ```
 
 **Key formats by wallet type:**
-- `p2wpkh` mainnet: `zpub` (SLIP-0132)
-- `p2wpkh` testnet: `vpub` (SLIP-0132)
-- `p2tr` mainnet: `xpub` (standard)
-- `p2tr` testnet: `tpub` (standard)
+- `p2tr` mainnet: `xpub` (standard BIP86)
+- `p2tr` testnet: `tpub` (standard BIP86)
+- `p2wpkh` mainnet: `zpub` (SLIP-0132 BIP84)
+- `p2wpkh` testnet: `vpub` (SLIP-0132 BIP84)
 
 **Watch-only wallet workflow:**
 1. Export the xpub: `vault read btc/wallets/my-wallet/xpub`
@@ -478,8 +510,8 @@ GET btc/wallets/:name/qr
 **Response (format=png):**
 ```json
 {
-  "address": "bc1q...",
-  "uri": "bitcoin:bc1q...",
+  "address": "bc1p...",
+  "uri": "bitcoin:bc1p...",
   "qr_png": "iVBORw0KGgoAAAANSUhEUgAA..."
 }
 ```
@@ -487,8 +519,8 @@ GET btc/wallets/:name/qr
 **Response (format=ascii):**
 ```json
 {
-  "address": "bc1q...",
-  "uri": "bitcoin:bc1q...",
+  "address": "bc1p...",
+  "uri": "bitcoin:bc1p...",
   "qr": "█████████████████████████████\n█████..."
 }
 ```
@@ -515,9 +547,9 @@ POST btc/wallets/:name/send
   "txid": "abc123...",
   "fee": 1410,
   "amount": 50000,
-  "to": "bc1q...",
+  "to": "bc1p...",
   "change_amount": 98590,
-  "change_address": "bc1q...",
+  "change_address": "bc1p...",
   "broadcast": true
 }
 ```
@@ -541,7 +573,7 @@ POST btc/wallets/:name/estimate
 ```json
 {
   "amount": 50000,
-  "to": "bc1q...",
+  "to": "bc1p...",
   "fee_rate": 10,
   "estimated_fee": 1410,
   "estimated_vsize": 141,
@@ -607,7 +639,8 @@ Vault can participate as one signer in a multi-sig (m-of-n) setup. The recommend
 ```bash
 # 1. Export xpub from Vault
 vault read btc/wallets/treasury/xpub
-# Returns: zpub6rFR7y4Q2AijBE... (for p2wpkh wallet)
+# Returns: xpub6CUGRUonZSQ4T... (for Taproot wallet)
+# Or: zpub6rFR7y4Q2AijBE... (for p2wpkh wallet)
 
 # 2. Export xpubs from other signers (Coldcard, Ledger, etc.)
 # 3. Import all xpubs into coordinator (Sparrow) to create multi-sig wallet
@@ -634,6 +667,8 @@ vault write btc/wallets/treasury/psbt/finalize psbt="cHNidP8..." broadcast=true
 | P2WSH | Native SegWit multi-sig | Most common, lower fees |
 | P2SH-P2WSH | Wrapped SegWit | Legacy compatibility |
 
+> **Taproot Multi-Sig:** For `tr()` descriptors with script-path spends, the workflow is identical — Vault will sign compatible inputs via PSBT.
+
 The `/psbt/sign` endpoint automatically detects multi-sig inputs by:
 1. Matching BIP32 derivation paths in the PSBT
 2. Scanning witness scripts for pubkeys derived from the wallet
@@ -641,7 +676,7 @@ The `/psbt/sign` endpoint automatically detects multi-sig inputs by:
 #### Example: 2-of-3 Multi-Sig with Vault
 
 ```
-Signer 1: Vault (zpub from vault read btc/wallets/treasury/xpub)
+Signer 1: Vault (xpub from vault read btc/wallets/treasury/xpub)
 Signer 2: Coldcard hardware wallet
 Signer 3: Ledger hardware wallet
 
