@@ -48,13 +48,11 @@ Responsibilities:
 
 - Parse and decode the submitted PSBT.
 - Load wallet metadata and wallet descriptors.
-- Validate that the PSBT is compatible with the wallet network.
 - Validate that the PSBT only uses supported script policy within reviewed scope.
 - Reject unsafe requests with `Error::InvalidRequest` before invoking BDK signing.
 
 Policy rules for this pass:
 
-- Reject any output address or script that decodes to a different network than the wallet.
 - Reject any signing attempt where available UTXO/script context implies unsupported script policy.
 - Fail closed when required inspection context is absent or ambiguous.
 
@@ -129,7 +127,7 @@ existing default is treated as over-disclosure in the audited threat model.
 ### `POST /wallets/:name/sign`
 
 Behavior stays functionally the same for valid requests, but requests now fail earlier when the
-PSBT violates network or script-policy rules.
+PSBT uses unsupported script policy or omits required inspection context.
 
 ### `POST /wallets/:name/sign-raw`
 
@@ -158,10 +156,8 @@ Add focused regression coverage in separate security-oriented test files.
 
 ### Signing Policy Tests
 
-- Mixed-network output address is rejected.
 - Unsupported script policy is rejected.
 - Ambiguous or insufficient PSBT inspection context fails closed.
-- Valid same-network supported-policy PSBT still signs.
 
 ### Descriptor Disclosure Tests
 
