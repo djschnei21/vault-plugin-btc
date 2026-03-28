@@ -31,12 +31,45 @@ fn parse_sign_request(
     validate_json(data)
 }
 
-fn script_matches_address_type(script_pubkey: &bitcoin::Script, address_type: AddressType) -> bool {
+fn validate_output_networks(psbt: &Psbt, wallet_network: bitcoin::Network) -> Result<(), Error> {
+    for (index, output) in psbt.unsigned_tx.output.iter().enumerate() {
+        match bitcoin::Address::from_script(&output.script_pubkey, wallet_network) {
+            Ok(_) => {}
+            Err(bitcoin::address::FromScriptError::UnrecognizedScript) => {}
+            Err(err) => {
+                return Err(Error::InvalidRequest(format!(
+                    "output {index} has incompatible address-like script for wallet network {}: {err}",
+                    wallet_network
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn script_matches_address_type(
+    script_pubkey: &bitcoin::Script,
+    input: &bitcoin::psbt::Input,
+    address_type: AddressType,
+) -> Result<bool, Error> {
     match address_type {
-        AddressType::Legacy => script_pubkey.is_p2pkh(),
-        AddressType::NestedSegwit => script_pubkey.is_p2sh(),
-        AddressType::NativeSegwit => script_pubkey.is_p2wpkh(),
-        AddressType::Taproot => script_pubkey.is_p2tr(),
+        AddressType::Legacy => Ok(script_pubkey.is_p2pkh()),
+        AddressType::NestedSegwit => {
+            if !script_pubkey.is_p2sh() {
+                return Ok(false);
+            }
+
+            let redeem_script = input.redeem_script.as_ref().ok_or_else(|| {
+                Error::InvalidRequest(
+                    "nested-segwit input missing redeem script context".to_string(),
+                )
+            })?;
+
+            Ok(redeem_script.is_p2wpkh())
+        }
+        AddressType::NativeSegwit => Ok(script_pubkey.is_p2wpkh()),
+        AddressType::Taproot => Ok(script_pubkey.is_p2tr()),
     }
 }
 
@@ -51,6 +84,8 @@ fn validate_signing_policy(
             declared_network, metadata.network
         )));
     }
+
+    validate_output_networks(psbt, metadata.network)?;
 
     for (index, input) in psbt.inputs.iter().enumerate() {
         let previous_output = psbt.unsigned_tx.input[index].previous_output;
@@ -73,7 +108,7 @@ fn validate_signing_policy(
             )));
         };
 
-        if !script_matches_address_type(script_pubkey.as_script(), metadata.address_type) {
+        if !script_matches_address_type(script_pubkey.as_script(), input, metadata.address_type)? {
             return Err(Error::InvalidRequest(format!(
                 "input {index} uses unsupported script template for wallet policy"
             )));
@@ -285,6 +320,27 @@ mod tests {
         psbt
     }
 
+    fn psbt_with_output(script_pubkey: ScriptBuf) -> Psbt {
+        let unsigned_tx = Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::new(Txid::all_zeros(), 0),
+                ..Default::default()
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(5_000),
+                script_pubkey,
+            }],
+        };
+
+        Psbt::from_unsigned_tx(unsigned_tx).expect("PSBT creation must succeed")
+    }
+
+    fn malformed_witness_program_script() -> ScriptBuf {
+        ScriptBuf::from_bytes(vec![0x00, 0x02, 0x01, 0x02])
+    }
+
     #[test]
     fn test_sign_request_deserializes() {
         let request: SignRequest = serde_json::from_value(serde_json::json!({
@@ -360,5 +416,58 @@ mod tests {
             err,
             Error::InvalidRequest(message) if message.contains("unsupported script template")
         ));
+    }
+
+    #[test]
+    fn test_validate_signing_policy_rejects_malformed_address_like_output() {
+        let psbt = psbt_with_output(malformed_witness_program_script());
+
+        let err = validate_signing_policy(
+            &psbt,
+            &test_metadata(AddressType::NativeSegwit),
+            Network::Testnet,
+        )
+        .expect_err("malformed address-like outputs must fail closed");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message.contains("output 0") && message.contains("address-like script")
+        ));
+    }
+
+    #[test]
+    fn test_validate_signing_policy_rejects_nested_segwit_without_redeem_script() {
+        let script_hash = bitcoin::ScriptHash::from_byte_array([3; 20]);
+        let psbt = psbt_with_witness_utxo(ScriptBuf::new_p2sh(&script_hash));
+
+        let err = validate_signing_policy(
+            &psbt,
+            &test_metadata(AddressType::NestedSegwit),
+            Network::Testnet,
+        )
+        .expect_err("ambiguous nested segwit inputs must fail closed");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message.contains("nested-segwit") && message.contains("redeem")
+        ));
+    }
+
+    #[test]
+    fn test_validate_signing_policy_accepts_nested_segwit_with_matching_redeem_script() {
+        let script_hash = bitcoin::ScriptHash::hash(ScriptBuf::new_p2wpkh(
+            &bitcoin::WPubkeyHash::all_zeros(),
+        )
+        .as_bytes());
+        let mut psbt = psbt_with_witness_utxo(ScriptBuf::new_p2sh(&script_hash));
+        psbt.inputs[0].redeem_script = Some(ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::all_zeros()));
+
+        let result = validate_signing_policy(
+            &psbt,
+            &test_metadata(AddressType::NestedSegwit),
+            Network::Testnet,
+        );
+
+        assert!(result.is_ok());
     }
 }
