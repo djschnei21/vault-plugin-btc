@@ -5,6 +5,15 @@ use crate::proto::pb::Response as PbResponse;
 use crate::router::HandlerContext;
 use crate::wallet::manager::WalletManager;
 use crate::wallet::types::AddressType;
+use serde::Deserialize;
+use super::validation::validate_json;
+
+#[derive(Deserialize)]
+struct CreateWalletRequest {
+    network: String,
+    address_type: Option<String>,
+    mnemonic: Option<String>,
+}
 
 /// POST /wallets/:name - Create a new wallet.
 pub async fn create_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
@@ -14,39 +23,22 @@ pub async fn create_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?
         .clone();
 
-    // Get network from request or fall back to plugin config
-    let network = if let Some(net_str) = ctx.data.get("network").and_then(|v| v.as_str()) {
-        net_str
-            .parse()
-            .map_err(|_| Error::InvalidRequest(format!("invalid network: {net_str}")))?
-    } else {
-        let data = ctx
-            .storage
-            .get("config/plugin")
-            .await
-            .map_err(|e| Error::Storage(e.to_string()))?;
-        let config: PluginConfig = match data {
-            Some(d) => serde_json::from_slice(&d).map_err(|e| Error::Serde(e))?,
-            None => PluginConfig::default(),
-        };
-        config.network
-    };
+    let request: CreateWalletRequest = validate_json(&ctx.data)?;
 
-    // Get address type
-    let address_type = if let Some(at_str) = ctx.data.get("address_type").and_then(|v| v.as_str())
-    {
+    if !["mainnet", "testnet", "signet", "regtest"].contains(&request.network.as_str()) {
+        return Err(Error::InvalidNetwork(request.network));
+    }
+
+    let network = bitcoin::Network::from_str(&request.network).unwrap();
+
+    let address_type = if let Some(at_str) = &request.address_type {
         AddressType::from_str(at_str)
-            .ok_or_else(|| Error::InvalidRequest(format!("invalid address_type: {at_str}")))?
+            .ok_or_else(|| Error::InvalidRequest(format!("invalid address_type: {at_str}")))
     } else {
-        AddressType::default()
-    };
+        Ok(AddressType::default())
+    }?;
 
-    // Optional mnemonic import
-    let mnemonic = ctx
-        .data
-        .get("mnemonic")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+    let mnemonic = request.mnemonic;
 
     let metadata = WalletManager::create_wallet(
         ctx.storage.clone(),
@@ -105,4 +97,16 @@ pub async fn delete_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
 pub async fn list_wallets(ctx: HandlerContext) -> Result<PbResponse, Error> {
     let names = WalletManager::list_wallets(ctx.storage.clone()).await?;
     Ok(list_response(names))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_invalid_json() {
+        let invalid = serde_json::json!("invalid");
+        let result = validate_json::<CreateWalletRequest>(&invalid);
+        assert!(result.is_err());
+    }
 }
