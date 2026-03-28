@@ -1,4 +1,4 @@
-use super::validation::{parse_network, validate_json};
+use super::validation::validate_json;
 use crate::error::Error;
 use crate::handlers::ok_response;
 use crate::proto::pb::Response as PbResponse;
@@ -14,7 +14,6 @@ use tracing::{error, info};
 #[derive(Deserialize)]
 struct SignRequest {
     psbt: String,
-    network: String,
 }
 
 fn parse_sign_request(
@@ -24,28 +23,8 @@ fn parse_sign_request(
     if data.get("psbt").is_none() {
         return Err(Error::InvalidRequest(missing_psbt_message.to_string()));
     }
-    if data.get("network").is_none() {
-        return Err(Error::InvalidRequest("missing 'network' parameter".to_string()));
-    }
 
     validate_json(data)
-}
-
-fn validate_output_networks(psbt: &Psbt, wallet_network: bitcoin::Network) -> Result<(), Error> {
-    for (index, output) in psbt.unsigned_tx.output.iter().enumerate() {
-        match bitcoin::Address::from_script(&output.script_pubkey, wallet_network) {
-            Ok(_) => {}
-            Err(bitcoin::address::FromScriptError::UnrecognizedScript) => {}
-            Err(err) => {
-                return Err(Error::InvalidRequest(format!(
-                    "output {index} has incompatible address-like script for wallet network {}: {err}",
-                    wallet_network
-                )));
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn script_matches_address_type(
@@ -76,17 +55,7 @@ fn script_matches_address_type(
 fn validate_signing_policy(
     psbt: &Psbt,
     metadata: &WalletMetadata,
-    declared_network: bitcoin::Network,
 ) -> Result<(), Error> {
-    if declared_network != metadata.network {
-        return Err(Error::InvalidRequest(format!(
-            "declared network {} does not match wallet network {}",
-            declared_network, metadata.network
-        )));
-    }
-
-    validate_output_networks(psbt, metadata.network)?;
-
     for (index, input) in psbt.inputs.iter().enumerate() {
         let previous_output = psbt.unsigned_tx.input[index].previous_output;
         let script_pubkey = if let Some(witness_utxo) = &input.witness_utxo {
@@ -132,7 +101,6 @@ pub async fn sign_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
 
     let request = parse_sign_request(&ctx.data, "missing 'psbt' parameter")?;
     let psbt_b64 = request.psbt;
-    let declared_network = parse_network(&request.network)?;
 
     info!(wallet = %name, "Signing PSBT");
 
@@ -152,7 +120,7 @@ pub async fn sign_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
     // Load wallet with private keys
     let (wallet, metadata) = WalletManager::load_bdk_wallet(ctx.storage.clone(), name).await?;
 
-    validate_signing_policy(&psbt, &metadata, declared_network)?;
+    validate_signing_policy(&psbt, &metadata)?;
 
     // Sign
     let finalized = wallet
@@ -189,7 +157,6 @@ pub async fn sign_raw(ctx: HandlerContext) -> Result<PbResponse, Error> {
         "missing 'psbt' parameter - provide a PSBT for signing",
     )?;
     let psbt_b64 = request.psbt;
-    let declared_network = parse_network(&request.network)?;
 
     info!(wallet = %name, "Signing raw transaction via PSBT");
 
@@ -207,7 +174,7 @@ pub async fn sign_raw(ctx: HandlerContext) -> Result<PbResponse, Error> {
 
     let (wallet, metadata) = WalletManager::load_bdk_wallet(ctx.storage.clone(), name).await?;
 
-    validate_signing_policy(&psbt, &metadata, declared_network)?;
+    validate_signing_policy(&psbt, &metadata)?;
 
     let finalized = wallet
         .sign(&mut psbt, SignOptions::default())
@@ -320,42 +287,19 @@ mod tests {
         psbt
     }
 
-    fn psbt_with_output(script_pubkey: ScriptBuf) -> Psbt {
-        let unsigned_tx = Transaction {
-            version: Version::TWO,
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::new(Txid::all_zeros(), 0),
-                ..Default::default()
-            }],
-            output: vec![TxOut {
-                value: Amount::from_sat(5_000),
-                script_pubkey,
-            }],
-        };
-
-        Psbt::from_unsigned_tx(unsigned_tx).expect("PSBT creation must succeed")
-    }
-
-    fn malformed_witness_program_script() -> ScriptBuf {
-        ScriptBuf::from_bytes(vec![0x00, 0x02, 0x01, 0x02])
-    }
-
     #[test]
     fn test_sign_request_deserializes() {
         let request: SignRequest = serde_json::from_value(serde_json::json!({
-            "psbt": "cHNidP8BAAoCAAAAAQ==",
-            "network": "testnet"
+            "psbt": "cHNidP8BAAoCAAAAAQ=="
         }))
         .expect("request should deserialize");
 
         assert_eq!(request.psbt, "cHNidP8BAAoCAAAAAQ==");
-        assert_eq!(request.network, "testnet");
     }
 
     #[tokio::test]
     async fn test_sign_psbt_missing_psbt_returns_specific_error() {
-        let err = sign_psbt(test_context(serde_json::json!({ "network": "testnet" })))
+        let err = sign_psbt(test_context(serde_json::json!({})))
             .await
             .expect_err("missing psbt should fail");
 
@@ -366,20 +310,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sign_psbt_missing_network_returns_specific_error() {
-        let err = sign_psbt(test_context(serde_json::json!({ "psbt": "cHNidP8BAAoCAAAAAQ==" })))
-            .await
-            .expect_err("missing network should fail");
-
-        assert!(matches!(
-            err,
-            Error::InvalidRequest(message) if message == "missing 'network' parameter"
-        ));
-    }
-
-    #[tokio::test]
     async fn test_sign_raw_missing_psbt_returns_specific_error() {
-        let err = sign_raw(test_context(serde_json::json!({ "network": "testnet" })))
+        let err = sign_raw(test_context(serde_json::json!({})))
             .await
             .expect_err("missing psbt should fail");
 
@@ -396,7 +328,7 @@ mod tests {
             &bitcoin::WPubkeyHash::all_zeros(),
         ));
 
-        let result = validate_signing_policy(&psbt, &test_metadata(AddressType::NativeSegwit), Network::Testnet);
+        let result = validate_signing_policy(&psbt, &test_metadata(AddressType::NativeSegwit));
 
         assert!(result.is_ok());
     }
@@ -409,7 +341,7 @@ mod tests {
             None,
         ));
 
-        let err = validate_signing_policy(&psbt, &test_metadata(AddressType::NativeSegwit), Network::Testnet)
+        let err = validate_signing_policy(&psbt, &test_metadata(AddressType::NativeSegwit))
             .expect_err("unsupported script template must fail");
 
         assert!(matches!(
@@ -419,32 +351,11 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_signing_policy_rejects_malformed_address_like_output() {
-        let psbt = psbt_with_output(malformed_witness_program_script());
-
-        let err = validate_signing_policy(
-            &psbt,
-            &test_metadata(AddressType::NativeSegwit),
-            Network::Testnet,
-        )
-        .expect_err("malformed address-like outputs must fail closed");
-
-        assert!(matches!(
-            err,
-            Error::InvalidRequest(message) if message.contains("output 0") && message.contains("address-like script")
-        ));
-    }
-
-    #[test]
     fn test_validate_signing_policy_rejects_nested_segwit_without_redeem_script() {
         let script_hash = bitcoin::ScriptHash::from_byte_array([3; 20]);
         let psbt = psbt_with_witness_utxo(ScriptBuf::new_p2sh(&script_hash));
 
-        let err = validate_signing_policy(
-            &psbt,
-            &test_metadata(AddressType::NestedSegwit),
-            Network::Testnet,
-        )
+        let err = validate_signing_policy(&psbt, &test_metadata(AddressType::NestedSegwit))
         .expect_err("ambiguous nested segwit inputs must fail closed");
 
         assert!(matches!(
@@ -462,11 +373,7 @@ mod tests {
         let mut psbt = psbt_with_witness_utxo(ScriptBuf::new_p2sh(&script_hash));
         psbt.inputs[0].redeem_script = Some(ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::all_zeros()));
 
-        let result = validate_signing_policy(
-            &psbt,
-            &test_metadata(AddressType::NestedSegwit),
-            Network::Testnet,
-        );
+        let result = validate_signing_policy(&psbt, &test_metadata(AddressType::NestedSegwit));
 
         assert!(result.is_ok());
     }
