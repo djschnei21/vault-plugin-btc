@@ -36,6 +36,10 @@ struct CreatePsbtRequest {
     outputs: Vec<CreatePsbtOutput>,
 }
 
+const MAX_COMBINE_PSBTS: usize = 32;
+const MAX_CREATE_INPUTS: usize = 128;
+const MAX_CREATE_OUTPUTS: usize = 128;
+
 fn parse_psbt_string_request(data: &serde_json::Value) -> Result<PsbtStringRequest, Error> {
     if data.get("psbt").is_none() {
         return Err(Error::InvalidRequest(
@@ -132,7 +136,15 @@ fn parse_combine_psbt_request(data: &serde_json::Value) -> Result<CombinePsbtReq
 
     validate_combine_psbt_entries(data)?;
 
-    validate_json(data)
+    let request: CombinePsbtRequest = validate_json(data)?;
+
+    if request.psbts.len() > MAX_COMBINE_PSBTS {
+        return Err(Error::InvalidRequest(format!(
+            "too many PSBTs: maximum is {MAX_COMBINE_PSBTS}"
+        )));
+    }
+
+    Ok(request)
 }
 
 fn parse_create_psbt_request(data: &serde_json::Value) -> Result<CreatePsbtRequest, Error> {
@@ -145,7 +157,20 @@ fn parse_create_psbt_request(data: &serde_json::Value) -> Result<CreatePsbtReque
 
     validate_create_psbt_entries(data)?;
 
-    validate_json(data)
+    let request: CreatePsbtRequest = validate_json(data)?;
+
+    if request.inputs.len() > MAX_CREATE_INPUTS {
+        return Err(Error::InvalidRequest(format!(
+            "too many inputs: maximum is {MAX_CREATE_INPUTS}"
+        )));
+    }
+    if request.outputs.len() > MAX_CREATE_OUTPUTS {
+        return Err(Error::InvalidRequest(format!(
+            "too many outputs: maximum is {MAX_CREATE_OUTPUTS}"
+        )));
+    }
+
+    Ok(request)
 }
 
 /// POST /psbt/decode - Decode and inspect a PSBT.
