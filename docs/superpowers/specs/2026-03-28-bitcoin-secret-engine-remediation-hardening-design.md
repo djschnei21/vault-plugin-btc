@@ -192,7 +192,7 @@ changing storage coordination behavior.
 
 This remediation is complete when:
 
-- Signing endpoints reject mixed-network and unsupported-policy requests before invoking signing.
+- Signing endpoints reject unsupported-policy or context-ambiguous requests before invoking signing.
 - Standard key-read responses do not disclose public descriptors.
 - Address allocation is protected against duplicate reservation across multiple plugin processes
   sharing storage.
