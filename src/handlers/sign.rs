@@ -7,7 +7,9 @@ use crate::wallet::manager::WalletManager;
 use crate::wallet::types::{AddressType, WalletMetadata};
 use base64::Engine;
 use bdk_wallet::SignOptions;
+use bitcoin::hashes::Hash;
 use bitcoin::psbt::Psbt;
+use bitcoin::ScriptBuf;
 use serde::Deserialize;
 use tracing::{error, info};
 
@@ -45,7 +47,22 @@ fn script_matches_address_type(
                 )
             })?;
 
-            Ok(redeem_script.is_p2wpkh())
+            if !redeem_script.is_p2wpkh() {
+                return Ok(false);
+            }
+
+            let expected_script_pubkey = ScriptBuf::new_p2sh(&bitcoin::ScriptHash::hash(
+                redeem_script.as_bytes(),
+            ));
+
+            if expected_script_pubkey.as_script() != script_pubkey {
+                return Err(Error::InvalidRequest(
+                    "nested-segwit redeem script does not match prevout script hash"
+                        .to_string(),
+                ));
+            }
+
+            Ok(true)
         }
         AddressType::NativeSegwit => Ok(script_pubkey.is_p2wpkh()),
         AddressType::Taproot => Ok(script_pubkey.is_p2tr()),
@@ -376,5 +393,25 @@ mod tests {
         let result = validate_signing_policy(&psbt, &test_metadata(AddressType::NestedSegwit));
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_signing_policy_rejects_nested_segwit_with_mismatched_redeem_script() {
+        let script_hash = bitcoin::ScriptHash::hash(ScriptBuf::new_p2wpkh(
+            &bitcoin::WPubkeyHash::all_zeros(),
+        )
+        .as_bytes());
+        let mut psbt = psbt_with_witness_utxo(ScriptBuf::new_p2sh(&script_hash));
+        psbt.inputs[0].redeem_script = Some(ScriptBuf::new_p2wpkh(
+            &bitcoin::WPubkeyHash::from_byte_array([9; 20]),
+        ));
+
+        let err = validate_signing_policy(&psbt, &test_metadata(AddressType::NestedSegwit))
+            .expect_err("mismatched nested segwit redeem script must fail closed");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message.contains("nested-segwit") && message.contains("redeem")
+        ));
     }
 }
