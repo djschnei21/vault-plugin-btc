@@ -5,6 +5,8 @@ use std::error::Error as StdError;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use vault_plugin_btc::proto::pb::Request as PbRequest;
+use vault_plugin_btc::proto::pb::Response as PbResponse;
+use vault_plugin_btc::router::Router;
 use vault_plugin_btc::storage::Storage;
 
 #[derive(Default, Clone)]
@@ -16,6 +18,35 @@ impl InMemoryStorage {
     pub fn new() -> Self {
         Self::default()
     }
+}
+
+#[allow(dead_code)]
+pub fn response_json(response: &PbResponse) -> Value {
+    serde_json::from_str(&response.data).expect("response should contain valid JSON")
+}
+
+#[allow(dead_code)]
+pub async fn bootstrap_wallet(
+    router: &Router,
+    storage: Arc<InMemoryStorage>,
+    name: &str,
+    network: &str,
+    address_type: &str,
+) {
+    router
+        .route(
+            &request(
+                "create",
+                &format!("wallets/{name}"),
+                Some(serde_json::json!({
+                    "network": network,
+                    "address_type": address_type,
+                })),
+            ),
+            storage,
+        )
+        .await
+        .expect("wallet bootstrap must succeed");
 }
 
 #[async_trait]
