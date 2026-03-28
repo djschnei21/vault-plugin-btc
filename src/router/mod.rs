@@ -58,11 +58,12 @@ struct Route {
 /// Routes Vault requests to handler functions based on path and operation.
 pub struct Router {
     routes: Vec<Route>,
+    rate_limiter: Option<crate::rate_limit::RateLimiter>,
 }
 
 impl Router {
     pub fn new() -> Self {
-        let mut router = Self { routes: vec![] };
+        let mut router = Self { routes: vec![], rate_limiter: None };
         handlers::register_routes(&mut router);
         router
     }
@@ -99,7 +100,7 @@ impl Router {
 
     /// Route a Vault protobuf request to the appropriate handler.
     pub async fn route(
-        &self,
+        &mut self,
         request: &PbRequest,
         storage: Arc<dyn Storage + Send + Sync>,
     ) -> Result<PbResponse, Error> {
@@ -109,6 +110,12 @@ impl Router {
         let path = request.path.trim_matches('/');
 
         debug!(operation = ?operation, path = %path, "routing request");
+
+        if let Some(ref mut rl) = self.rate_limiter {
+            if !rl.check(&request.path) {
+                return Err(Error::InvalidRequest("rate limit exceeded".to_string()));
+            }
+        }
 
         for route in &self.routes {
             // For list operations, only match list patterns

@@ -20,7 +20,7 @@ use tracing::{debug, info, warn};
 pub struct BackendService {
     storage: Arc<RwLock<Option<VaultStorage>>>,
     broker: Arc<BrokerService>,
-    router: Arc<Router>,
+    router: Arc<RwLock<Router>>,
 }
 
 impl BackendService {
@@ -28,7 +28,7 @@ impl BackendService {
         Self {
             storage: Arc::new(RwLock::new(None)),
             broker,
-            router: Arc::new(router),
+            router: Arc::new(RwLock::new(router)),
         }
     }
 
@@ -145,7 +145,8 @@ impl Backend for BackendService {
 
         debug!(operation = %operation, path = %path, "handling request");
 
-        match self.router.route(&pb_request, Arc::new(storage) as Arc<dyn Storage + Send + Sync>).await {
+        let mut router = self.router.write().await;
+        match router.route(&pb_request, Arc::new(storage) as Arc<dyn Storage + Send + Sync>).await {
             Ok(response) => Ok(Response::new(HandleRequestReply {
                 response: Some(response),
                 err: None,
