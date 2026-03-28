@@ -14,18 +14,12 @@ pub async fn new_address(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .get("name")
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?;
 
-    let mut metadata = WalletManager::get_metadata(ctx.storage.clone(), name).await?;
-    let (wallet, _) = WalletManager::load_bdk_wallet(ctx.storage.clone(), name).await?;
-
-    let index = metadata.next_external_index;
-    let address_info = wallet.peek_address(KeychainKind::External, index);
-
-    // Advance the index
-    metadata.next_external_index = index + 1;
-    WalletManager::update_metadata(ctx.storage.clone(), &metadata).await?;
+    let (address, index) = WalletManager::next_external_address(ctx.storage.clone(), name)
+        .await
+        .map_err(|e| Error::Internal(format!("failed to allocate address: {e}")))?;
 
     Ok(ok_response(serde_json::json!({
-        "address": address_info.address.to_string(),
+        "address": address,
         "index": index,
         "keychain": "external",
     })))

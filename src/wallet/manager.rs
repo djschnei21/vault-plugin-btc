@@ -213,4 +213,27 @@ impl WalletManager {
             .collect();
         Ok(names)
     }
+
+    /// Advance the derivation index and return the next external address.
+    /// This operation is serialized per-wallet to prevent address reuse.
+    pub async fn next_external_address(
+        storage: Arc<dyn Storage + Send + Sync>,
+        name: &str,
+    ) -> Result<(String, u32), Box<dyn std::error::Error>> {
+        let wallet_lock = crate::wallet::locks::wallet_lock(name).await;
+        let _guard = wallet_lock.lock().await;
+
+        let mut metadata = Self::get_metadata(storage.clone(), name).await?;
+        let (wallet, _) = Self::load_bdk_wallet(storage.clone(), name).await?;
+        let index = metadata.next_external_index;
+        let address = wallet
+            .peek_address(bdk_wallet::KeychainKind::External, index)
+            .address
+            .to_string();
+
+        metadata.next_external_index = index + 1;
+        Self::update_metadata(storage, &metadata).await?;
+
+        Ok((address, index))
+    }
 }
