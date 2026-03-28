@@ -7,6 +7,7 @@ use crate::wallet::manager::WalletManager;
 use crate::wallet::types::AddressType;
 use serde::Deserialize;
 use super::validation::validate_json;
+use tracing::{info, error};
 
 #[derive(Deserialize)]
 struct CreateWalletRequest {
@@ -23,11 +24,43 @@ pub async fn create_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?
         .clone();
 
+    info!("Creating wallet: {}", name);
+
     let request: CreateWalletRequest = validate_json(&ctx.data)?;
 
     if !["mainnet", "testnet", "signet", "regtest"].contains(&request.network.as_str()) {
+        error!("Invalid network for wallet {}: {}", name, request.network);
         return Err(Error::InvalidNetwork(request.network));
     }
+
+    let network = bitcoin::Network::from_str(&request.network).unwrap();
+
+    let address_type = if let Some(at_str) = &request.address_type {
+        AddressType::from_str(at_str)
+            .ok_or_else(|| Error::InvalidRequest(format!("invalid address_type: {at_str}")))
+    } else {
+        Ok(AddressType::default())
+    }?;
+
+    let mnemonic = request.mnemonic;
+
+    let metadata = WalletManager::create_wallet(
+        &ctx.storage,
+        &name,
+        network,
+        address_type,
+        mnemonic.as_deref(),
+    ).await?;
+
+    info!("Wallet created successfully: {}", name);
+
+    Ok(ok_response(serde_json::json!({
+        "name": metadata.name,
+        "network": metadata.network.to_string(),
+        "address_type": metadata.address_type.to_string(),
+        "created_at": metadata.created_at
+    })))
+}
 
     let network = bitcoin::Network::from_str(&request.network).unwrap();
 
@@ -67,7 +100,11 @@ pub async fn read_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .get("name")
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?;
 
+    info!("Reading wallet: {}", name);
+
     let metadata = WalletManager::get_metadata(ctx.storage.clone(), name).await?;
+
+    info!("Wallet read successfully: {}", name);
 
     Ok(ok_response(serde_json::json!({
         "name": metadata.name,
@@ -88,14 +125,23 @@ pub async fn delete_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .get("name")
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?;
 
+    info!("Deleting wallet: {}", name);
+
     WalletManager::delete_wallet(ctx.storage.clone(), name).await?;
+
+    info!("Wallet deleted successfully: {}", name);
 
     Ok(empty_response())
 }
 
 /// LIST /wallets - List all wallet names.
 pub async fn list_wallets(ctx: HandlerContext) -> Result<PbResponse, Error> {
+    info!("Listing wallets");
+
     let names = WalletManager::list_wallets(ctx.storage.clone()).await?;
+
+    info!("Listed {} wallets", names.len());
+
     Ok(list_response(names))
 }
 
