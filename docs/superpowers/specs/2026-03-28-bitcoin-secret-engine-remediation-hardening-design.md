@@ -58,6 +58,7 @@ Policy rules for this pass:
 
 The intent is not to replace BDK's signing correctness checks. The plugin adds a narrower custody
 policy layer so a remote caller cannot rely on implicit library behavior for authority expansion.
+Network selection remains mount-level configuration rather than a per-request signing parameter.
 
 ### 2. Descriptor Disclosure Reduction
 
