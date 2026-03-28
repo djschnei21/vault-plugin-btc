@@ -1,9 +1,11 @@
 /// Generated types from vault sdk/logical protos (identity, event, plugin)
+#[allow(unused)]
 pub mod logical {
     tonic::include_proto!("logical");
 }
 
 /// Generated types from vault backend.proto
+#[allow(unused)]
 pub mod pb {
     tonic::include_proto!("pb");
 }
