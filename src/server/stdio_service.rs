@@ -15,12 +15,6 @@ pub struct StdioService {
 }
 
 impl StdioService {
-    pub fn new(stderr_rx: mpsc::Receiver<Vec<u8>>) -> Self {
-        Self {
-            stderr_rx: tokio::sync::Mutex::new(Some(stderr_rx)),
-        }
-    }
-
     /// Create a StdioService that sends no data (simplest implementation).
     pub fn empty() -> Self {
         let (_tx, rx) = mpsc::channel(1);
