@@ -111,3 +111,59 @@ async fn fresh_reservation_blocks_duplicate_allocation() {
     assert_eq!(reservation["index"], 0);
     assert_eq!(reservation["holder"], "other-process");
 }
+
+#[tokio::test]
+async fn fresh_reservation_at_different_index_still_blocks_allocation() {
+    let router = Router::new();
+    let storage = Arc::new(InMemoryStorage::new());
+
+    bootstrap_wallet(
+        &router,
+        storage.clone(),
+        "reservation-wallet",
+        "testnet",
+        "native_segwit",
+    )
+    .await;
+
+    seed_json(
+        storage.clone(),
+        "wallets/reservation-wallet/address-reservation",
+        serde_json::json!({
+            "index": 7,
+            "holder": "other-process",
+            "created_at": unix_time_secs(),
+        }),
+    )
+    .await;
+
+    let err = router
+        .route(
+            &request(
+                "update",
+                "wallets/reservation-wallet/addresses/new",
+                Some(serde_json::json!({})),
+            ),
+            storage.clone(),
+        )
+        .await
+        .expect_err("fresh reservation at another index should still block allocation");
+
+    match err {
+        Error::Internal(message) => {
+            assert!(message.contains("reservation"), "unexpected error: {message}");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+
+    let metadata = load_json(storage.clone(), "wallets/reservation-wallet/metadata")
+        .await
+        .expect("metadata should still exist");
+    assert_eq!(metadata["next_external_index"], 0);
+
+    let reservation = load_json(storage, "wallets/reservation-wallet/address-reservation")
+        .await
+        .expect("fresh reservation should remain in place");
+    assert_eq!(reservation["index"], 7);
+    assert_eq!(reservation["holder"], "other-process");
+}

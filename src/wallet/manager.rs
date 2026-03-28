@@ -231,7 +231,7 @@ impl WalletManager {
             let existing_reservation = AddressReservation::load(storage.clone(), name).await?;
 
             if let Some(existing) = existing_reservation {
-                if existing.index != index || existing.is_stale() {
+                if existing.is_stale() {
                     AddressReservation::clear(storage.clone(), name).await?;
                 } else if attempt == AddressReservation::max_retries() {
                     return Err(Box::new(Error::Internal(format!(
