@@ -1,4 +1,5 @@
 use vault_plugin_btc::storage::Storage;
+use std::error::Error as StdError;
 
 pub struct MockVaultStorage;
 
@@ -8,25 +9,26 @@ impl MockVaultStorage {
     }
 }
 
+#[async_trait::async_trait]
 impl Storage for MockVaultStorage {
-    async fn get(&self, _key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+    async fn get(&self, _key: &str) -> Result<Option<Vec<u8>>, Box<dyn StdError>> {
         Ok(None)
     }
 
-    async fn put(&self, _key: &str, _value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn put(&self, _key: &str, _value: Vec<u8>) -> Result<(), Box<dyn StdError>> {
         Ok(())
     }
 
-    async fn delete(&self, _key: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn put_sealed(&self, _key: &str, _value: Vec<u8>) -> Result<(), Box<dyn StdError>> {
         Ok(())
     }
 
-    async fn list(&self, _prefix: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    async fn delete(&self, _key: &str) -> Result<(), Box<dyn StdError>> {
+        Ok(())
+    }
+
+    async fn list(&self, _prefix: &str) -> Result<Vec<String>, Box<dyn StdError>> {
         Ok(vec![])
-    }
-
-    async fn put_sealed(&self, _key: &str, _value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
     }
 }
 
