@@ -41,9 +41,6 @@ zeroize = { version = "1", features = ["derive"] }
 rand = "0.8"
 async-trait = "0.1"
 
-[build-dependencies]
-tonic-build = "0.12"
-
 [dev-dependencies]
 tokio-test = "0.4"
 mockall = "0.11"
