@@ -16,8 +16,9 @@ pub async fn get_keys(ctx: HandlerContext) -> Result<PbResponse, Error> {
     Ok(ok_response(serde_json::json!({
         "name": metadata.name,
         "network": metadata.network.to_string(),
-        "external_descriptor": metadata.external_descriptor_public,
-        "internal_descriptor": metadata.internal_descriptor_public,
+        "address_type": metadata.address_type,
+        "has_external_keychain": !metadata.external_descriptor_public.is_empty(),
+        "has_internal_keychain": !metadata.internal_descriptor_public.is_empty(),
     })))
 }
 

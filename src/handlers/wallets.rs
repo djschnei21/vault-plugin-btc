@@ -87,10 +87,10 @@ pub async fn read_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
         "network": metadata.network.to_string(),
         "address_type": metadata.address_type,
         "created_at": metadata.created_at,
-        "external_descriptor": metadata.external_descriptor_public,
-        "internal_descriptor": metadata.internal_descriptor_public,
         "next_external_index": metadata.next_external_index,
         "next_internal_index": metadata.next_internal_index,
+        "has_external_keychain": !metadata.external_descriptor_public.is_empty(),
+        "has_internal_keychain": !metadata.internal_descriptor_public.is_empty(),
     })))
 }
 
