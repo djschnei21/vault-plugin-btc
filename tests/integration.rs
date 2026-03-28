@@ -38,8 +38,6 @@ async fn test_create_wallet_success() {
 
     // Create HandlerContext
     let ctx = vault_plugin_btc::router::HandlerContext {
-        operation: vault_plugin_btc::router::Operation::Create,
-        path: "wallets/test".to_string(),
         params: [("name".to_string(), "test".to_string())].iter().cloned().collect(),
         data: serde_json::json!({
             "network": "testnet",
@@ -57,8 +55,6 @@ async fn test_create_wallet_invalid_network() {
     let storage = std::sync::Arc::new(MockVaultStorage::new()) as std::sync::Arc<dyn Storage + Send + Sync>;
 
     let ctx = vault_plugin_btc::router::HandlerContext {
-        operation: vault_plugin_btc::router::Operation::Create,
-        path: "wallets/test".to_string(),
         params: [("name".to_string(), "test".to_string())].iter().cloned().collect(),
         data: serde_json::json!({
             "network": "invalid"
