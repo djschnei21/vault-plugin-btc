@@ -22,7 +22,7 @@ pub enum Operation {
 }
 
 impl Operation {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "create" => Some(Operation::Create),
             "read" => Some(Operation::Read),
@@ -34,10 +34,14 @@ impl Operation {
     }
 }
 
+impl Default for Router {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Context passed to handler functions.
 pub struct HandlerContext {
-    pub operation: Operation,
-    pub path: String,
     pub params: HashMap<String, String>,
     pub data: serde_json::Value,
     pub storage: Arc<dyn Storage + Send + Sync>,
@@ -58,12 +62,11 @@ struct Route {
 /// Routes Vault requests to handler functions based on path and operation.
 pub struct Router {
     routes: Vec<Route>,
-    rate_limiter: Option<crate::rate_limit::RateLimiter>,
 }
 
 impl Router {
     pub fn new() -> Self {
-        let mut router = Self { routes: vec![], rate_limiter: None };
+        let mut router = Self { routes: vec![] };
         handlers::register_routes(&mut router);
         router
     }
@@ -100,22 +103,17 @@ impl Router {
 
     /// Route a Vault protobuf request to the appropriate handler.
     pub async fn route(
-        &mut self,
+        &self,
         request: &PbRequest,
         storage: Arc<dyn Storage + Send + Sync>,
     ) -> Result<PbResponse, Error> {
-        let operation = Operation::from_str(&request.operation)
-            .ok_or_else(|| Error::UnsupportedOperation(request.operation.clone(), request.path.clone()))?;
+        let operation = Operation::parse(&request.operation).ok_or_else(|| {
+            Error::UnsupportedOperation(request.operation.clone(), request.path.clone())
+        })?;
 
         let path = request.path.trim_matches('/');
 
         debug!(operation = ?operation, path = %path, "routing request");
-
-        if let Some(ref mut rl) = self.rate_limiter {
-            if !rl.check(&request.path) {
-                return Err(Error::InvalidRequest("rate limit exceeded".to_string()));
-            }
-        }
 
         for route in &self.routes {
             // For list operations, only match list patterns
@@ -131,14 +129,11 @@ impl Router {
                     let data = if request.data.is_empty() {
                         serde_json::Value::Object(serde_json::Map::new())
                     } else {
-                        serde_json::from_str(&request.data).unwrap_or_else(|_| {
-                            serde_json::Value::Object(serde_json::Map::new())
-                        })
+                        serde_json::from_str(&request.data)
+                            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
                     };
 
                     let ctx = HandlerContext {
-                        operation,
-                        path: path.to_string(),
                         params,
                         data,
                         storage: storage.clone(),
@@ -155,5 +150,66 @@ impl Router {
         }
 
         Err(Error::UnsupportedPath(request.path.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::proto::pb::Request as PbRequest;
+    use super::super::storage::Storage;
+    use super::Router;
+    use crate::error::Error;
+    use async_trait::async_trait;
+    use std::sync::Arc;
+
+    struct NoopStorage;
+
+    #[async_trait]
+    impl Storage for NoopStorage {
+        async fn get(&self, _key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+            Ok(None)
+        }
+
+        async fn put(&self, _key: &str, _value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+            Ok(())
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), Box<dyn std::error::Error>> {
+            Ok(())
+        }
+
+        async fn list(&self, _prefix: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+            Ok(vec![])
+        }
+
+        async fn put_sealed(
+            &self,
+            _key: &str,
+            _value: Vec<u8>,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn router_new_registers_routes() {
+        let router = Router::new();
+
+        assert!(!router.routes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn route_accepts_shared_router_reference() {
+        let router = Router::new();
+        let shared_router = &router;
+        let request = PbRequest {
+            operation: "read".to_string(),
+            path: "missing".to_string(),
+            ..Default::default()
+        };
+
+        let result = shared_router.route(&request, Arc::new(NoopStorage)).await;
+
+        assert!(matches!(result, Err(Error::UnsupportedPath(path)) if path == "missing"));
     }
 }

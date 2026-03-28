@@ -1,30 +1,20 @@
 use bitcoin::Network;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Address type determines the descriptor template and derivation path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AddressType {
     Legacy,
     NestedSegwit,
+    #[default]
     NativeSegwit,
     Taproot,
 }
 
 impl AddressType {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "legacy" | "p2pkh" => Some(AddressType::Legacy),
-            "nested_segwit" | "nested-segwit" | "p2sh-p2wpkh" => Some(AddressType::NestedSegwit),
-            "native_segwit" | "native-segwit" | "p2wpkh" | "segwit" => {
-                Some(AddressType::NativeSegwit)
-            }
-            "taproot" | "p2tr" => Some(AddressType::Taproot),
-            _ => None,
-        }
-    }
-
     /// BIP purpose number for this address type.
     pub fn purpose(&self) -> u32 {
         match self {
@@ -36,9 +26,19 @@ impl AddressType {
     }
 }
 
-impl Default for AddressType {
-    fn default() -> Self {
-        AddressType::NativeSegwit
+impl FromStr for AddressType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "legacy" | "p2pkh" => Ok(AddressType::Legacy),
+            "nested_segwit" | "nested-segwit" | "p2sh-p2wpkh" => Ok(AddressType::NestedSegwit),
+            "native_segwit" | "native-segwit" | "p2wpkh" | "segwit" => {
+                Ok(AddressType::NativeSegwit)
+            }
+            "taproot" | "p2tr" => Ok(AddressType::Taproot),
+            _ => Err(()),
+        }
     }
 }
 
@@ -70,15 +70,39 @@ mod tests {
 
     #[test]
     fn test_address_type_from_str() {
-        assert_eq!(AddressType::from_str("legacy"), Some(AddressType::Legacy));
-        assert_eq!(AddressType::from_str("p2pkh"), Some(AddressType::Legacy));
-        assert_eq!(AddressType::from_str("segwit"), Some(AddressType::NativeSegwit));
-        assert_eq!(AddressType::from_str("native-segwit"), Some(AddressType::NativeSegwit));
-        assert_eq!(AddressType::from_str("p2wpkh"), Some(AddressType::NativeSegwit));
-        assert_eq!(AddressType::from_str("nested-segwit"), Some(AddressType::NestedSegwit));
-        assert_eq!(AddressType::from_str("taproot"), Some(AddressType::Taproot));
-        assert_eq!(AddressType::from_str("p2tr"), Some(AddressType::Taproot));
-        assert_eq!(AddressType::from_str("invalid"), None);
+        assert_eq!(
+            "legacy".parse::<AddressType>().ok(),
+            Some(AddressType::Legacy)
+        );
+        assert_eq!(
+            "p2pkh".parse::<AddressType>().ok(),
+            Some(AddressType::Legacy)
+        );
+        assert_eq!(
+            "segwit".parse::<AddressType>().ok(),
+            Some(AddressType::NativeSegwit)
+        );
+        assert_eq!(
+            "native-segwit".parse::<AddressType>().ok(),
+            Some(AddressType::NativeSegwit)
+        );
+        assert_eq!(
+            "p2wpkh".parse::<AddressType>().ok(),
+            Some(AddressType::NativeSegwit)
+        );
+        assert_eq!(
+            "nested-segwit".parse::<AddressType>().ok(),
+            Some(AddressType::NestedSegwit)
+        );
+        assert_eq!(
+            "taproot".parse::<AddressType>().ok(),
+            Some(AddressType::Taproot)
+        );
+        assert_eq!(
+            "p2tr".parse::<AddressType>().ok(),
+            Some(AddressType::Taproot)
+        );
+        assert!("invalid".parse::<AddressType>().is_err());
     }
 
     #[test]
@@ -87,6 +111,11 @@ mod tests {
         assert_eq!(AddressType::NestedSegwit.purpose(), 49);
         assert_eq!(AddressType::NativeSegwit.purpose(), 84);
         assert_eq!(AddressType::Taproot.purpose(), 86);
+    }
+
+    #[test]
+    fn test_address_type_default() {
+        assert_eq!(AddressType::default(), AddressType::NativeSegwit);
     }
 
     #[test]

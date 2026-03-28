@@ -438,6 +438,8 @@ git commit -m "feat: enhance logging in all handlers"
 
 ### Task 11: Add Rate Limiting (Optional)
 
+> Note (final decision): Plugin-side rate limiting was intentionally removed. Vault server configuration is the correct layer for throttling and quota enforcement, so this task remains documented only as historical review context.
+
 **Files:**
 - Modify: `src/router/mod.rs` (add rate limiting)
 - Create: `src/rate_limit.rs`

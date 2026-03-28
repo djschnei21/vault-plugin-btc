@@ -1,4 +1,3 @@
-use bitcoin::Network;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,7 +23,9 @@ impl Default for PluginConfig {
 impl PluginConfig {
     pub fn validate(&self) -> Result<(), crate::error::Error> {
         if self.network.is_empty() {
-            return Err(crate::error::Error::ConfigError("network required".to_string()));
+            return Err(crate::error::Error::ConfigError(
+                "network required".to_string(),
+            ));
         }
         Ok(())
     }
@@ -36,10 +37,10 @@ mod tests {
 
     #[test]
     fn test_config_validation() {
-        let config = PluginConfig { network: "".to_string(), blockchain_backend_url: None };
+        let config = PluginConfig {
+            network: "".to_string(),
+            blockchain_backend_url: None,
+        };
         assert!(config.validate().is_err());
-    }
-}
-        Ok(())
     }
 }

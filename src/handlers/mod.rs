@@ -3,6 +3,7 @@ pub mod config;
 pub mod keys;
 pub mod psbt;
 pub mod sign;
+pub mod validation;
 pub mod wallets;
 
 use crate::proto::pb::Response as PbResponse;

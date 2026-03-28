@@ -1,9 +1,10 @@
+use crate::error::Error;
 use crate::proto::pb;
 use crate::proto::pb::{
-    backend_server::Backend, SetupArgs, SetupReply, InitializeArgs, InitializeReply, TypeReply, SpecialPathsReply, Paths, HandleRequestArgs, HandleRequestReply, HandleExistenceCheckArgs, HandleExistenceCheckReply, InvalidateKeyArgs,
-    storage_client::StorageClient,
+    backend_server::Backend, storage_client::StorageClient, Empty, HandleExistenceCheckArgs,
+    HandleExistenceCheckReply, HandleRequestArgs, HandleRequestReply, InitializeArgs,
+    InitializeReply, InvalidateKeyArgs, Paths, SetupArgs, SetupReply, SpecialPathsReply, TypeReply,
 };
-use crate::proto::plugin::Empty;
 use crate::router::Router;
 use crate::server::broker_service::BrokerService;
 use crate::storage::{Storage, VaultStorage};
@@ -20,7 +21,7 @@ use tracing::{debug, info, warn};
 pub struct BackendService {
     storage: Arc<RwLock<Option<VaultStorage>>>,
     broker: Arc<BrokerService>,
-    router: Arc<RwLock<Router>>,
+    router: Arc<Router>,
 }
 
 impl BackendService {
@@ -28,7 +29,7 @@ impl BackendService {
         Self {
             storage: Arc::new(RwLock::new(None)),
             broker,
-            router: Arc::new(RwLock::new(router)),
+            router: Arc::new(router),
         }
     }
 
@@ -81,9 +82,7 @@ impl Backend for BackendService {
 
         info!("backend setup complete");
 
-        Ok(Response::new(SetupReply {
-            err: String::new(),
-        }))
+        Ok(Response::new(SetupReply { err: String::new() }))
     }
 
     /// Initialize is called after Setup to perform any post-mount initialization.
@@ -145,8 +144,14 @@ impl Backend for BackendService {
 
         debug!(operation = %operation, path = %path, "handling request");
 
-        let mut router = self.router.write().await;
-        match router.route(&pb_request, Arc::new(storage) as Arc<dyn Storage + Send + Sync>).await {
+        match self
+            .router
+            .route(
+                &pb_request,
+                Arc::new(storage) as Arc<dyn Storage + Send + Sync>,
+            )
+            .await
+        {
             Ok(response) => Ok(Response::new(HandleRequestReply {
                 response: Some(response),
                 err: None,
@@ -205,14 +210,13 @@ impl Backend for BackendService {
                         }));
                     }
                     Err(e) => {
-                        let proto_err = if let Ok(err) = e.downcast::<Error>() {
-                            err.to_proto_error()
-                        } else {
-                            pb::ProtoError {
+                        let proto_err = match e.downcast::<Error>() {
+                            Ok(err) => err.to_proto_error(),
+                            Err(other) => pb::ProtoError {
                                 err_type: 2,
-                                err_msg: e.to_string(),
+                                err_msg: other.to_string(),
                                 err_code: 500,
-                            }
+                            },
                         };
                         return Ok(Response::new(HandleExistenceCheckReply {
                             check_found: false,
@@ -247,5 +251,56 @@ impl Backend for BackendService {
         let args = request.into_inner();
         debug!(key = %args.key, "invalidating key");
         Ok(Response::new(Empty {}))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proto::pb::Request as PbRequest;
+    use crate::storage::Storage;
+    use async_trait::async_trait;
+
+    struct NoopStorage;
+
+    #[async_trait]
+    impl Storage for NoopStorage {
+        async fn get(&self, _key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+            Ok(None)
+        }
+
+        async fn put(&self, _key: &str, _value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+            Ok(())
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), Box<dyn std::error::Error>> {
+            Ok(())
+        }
+
+        async fn list(&self, _prefix: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+            Ok(vec![])
+        }
+
+        async fn put_sealed(
+            &self,
+            _key: &str,
+            _value: Vec<u8>,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn backend_stores_router_as_shared_immutable_state() {
+        let backend = BackendService::new(Arc::new(BrokerService::new()), Router::new());
+        let request = PbRequest {
+            operation: "read".to_string(),
+            path: "missing".to_string(),
+            ..Default::default()
+        };
+
+        let result = backend.router.route(&request, Arc::new(NoopStorage)).await;
+
+        assert!(matches!(result, Err(Error::UnsupportedPath(path)) if path == "missing"));
     }
 }

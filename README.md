@@ -75,6 +75,119 @@ vault delete btc/wallets/my-wallet
 
 ---
 
+## Deployment
+
+### Building the Plugin
+
+Build the plugin binary:
+
+```bash
+cargo build --release
+```
+
+The binary will be at `target/release/vault-plugin-btc`.
+
+### Installing in Vault
+
+1. **Copy the binary to Vault's plugin directory:**
+
+   ```bash
+   sudo cp target/release/vault-plugin-btc /usr/local/lib/vault/plugins/
+   sudo chown vault:vault /usr/local/lib/vault/plugins/vault-plugin-btc
+   sudo chmod 755 /usr/local/lib/vault/plugins/vault-plugin-btc
+   ```
+
+2. **Register the plugin with Vault:**
+
+   ```bash
+   # Calculate SHA256
+   SHA256=$(sha256sum /usr/local/lib/vault/plugins/vault-plugin-btc | cut -d' ' -f1)
+
+   # Register
+   vault plugin register -sha256=$SHA256 secret vault-plugin-btc
+   ```
+
+3. **Enable the secret engine:**
+
+   ```bash
+   vault secrets enable -path=btc vault-plugin-btc
+   ```
+
+### Configuration
+
+Configure the plugin after enabling:
+
+```bash
+# Set network
+vault write btc/config network=testnet
+
+# Optional: Set blockchain backend
+vault write btc/config blockchain_backend_url="https://electrs.example.com:50001"
+```
+
+## Troubleshooting
+
+### Plugin Registration Issues
+
+**Error:** `plugin not found`
+
+- Verify the binary is in Vault's plugin directory
+- Check file permissions (readable by Vault user)
+- Confirm SHA256 hash matches exactly
+
+**Error:** `plugin failed to start`
+
+- Check Vault logs: `journalctl -u vault`
+- Ensure all dependencies are available (glibc, etc.)
+- Try running the plugin manually: `./vault-plugin-btc`
+
+### Network/Backend Issues
+
+**Error:** `connection refused` when generating addresses
+
+- Verify `blockchain_backend_url` is set and reachable
+- For testnet, use a public Electrum server
+- Check firewall settings
+
+**Slow operations:**
+
+- Blockchain backend may be overloaded
+- Consider using a local Bitcoin node
+
+### Permission Issues
+
+**Error:** `permission denied` on config writes
+
+- Config endpoints require root token
+- Use `vault auth enable userpass` or similar for non-root users
+
+### Wallet Issues
+
+**Error:** `wallet not found`
+
+- Check wallet name spelling
+- Use `vault list btc/wallets` to verify
+
+**Address reuse:**
+
+- The plugin tracks derivation indices automatically
+- Never reuse addresses manually
+
+### PSBT Signing Issues
+
+**Error:** `invalid PSBT`
+
+- Ensure PSBT is base64-encoded
+- Verify PSBT is created for the correct network
+- Check that wallet contains the keys for the PSBT inputs
+
+**Incomplete signing:**
+
+- For multi-sig, combine signatures first
+- Ensure all required keys are available in the wallet
+
+---
+
 ## API Reference
 
 All endpoints are accessed through the Vault CLI or HTTP API under the mount path (e.g., `btc/`). Vault operations map as follows:

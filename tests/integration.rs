@@ -1,5 +1,5 @@
-use vault_plugin_btc::storage::Storage;
 use std::error::Error as StdError;
+use vault_plugin_btc::storage::Storage;
 
 pub struct MockVaultStorage;
 
@@ -34,11 +34,15 @@ impl Storage for MockVaultStorage {
 
 #[tokio::test]
 async fn test_create_wallet_success() {
-    let storage = std::sync::Arc::new(MockVaultStorage::new()) as std::sync::Arc<dyn Storage + Send + Sync>;
+    let storage =
+        std::sync::Arc::new(MockVaultStorage::new()) as std::sync::Arc<dyn Storage + Send + Sync>;
 
     // Create HandlerContext
     let ctx = vault_plugin_btc::router::HandlerContext {
-        params: [("name".to_string(), "test".to_string())].iter().cloned().collect(),
+        params: [("name".to_string(), "test".to_string())]
+            .iter()
+            .cloned()
+            .collect(),
         data: serde_json::json!({
             "network": "testnet",
             "address_type": "p2wpkh"
@@ -52,10 +56,14 @@ async fn test_create_wallet_success() {
 
 #[tokio::test]
 async fn test_create_wallet_invalid_network() {
-    let storage = std::sync::Arc::new(MockVaultStorage::new()) as std::sync::Arc<dyn Storage + Send + Sync>;
+    let storage =
+        std::sync::Arc::new(MockVaultStorage::new()) as std::sync::Arc<dyn Storage + Send + Sync>;
 
     let ctx = vault_plugin_btc::router::HandlerContext {
-        params: [("name".to_string(), "test".to_string())].iter().cloned().collect(),
+        params: [("name".to_string(), "test".to_string())]
+            .iter()
+            .cloned()
+            .collect(),
         data: serde_json::json!({
             "network": "invalid"
         }),

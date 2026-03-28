@@ -1,11 +1,10 @@
 use crate::error::Error;
 use crate::proto::pb::{
-    storage_client::StorageClient, StorageDeleteArgs, StorageGetArgs, StorageListArgs,
-    StoragePutArgs, StorageEntry,
+    storage_client::StorageClient, StorageDeleteArgs, StorageEntry, StorageGetArgs,
+    StorageListArgs, StoragePutArgs,
 };
 use crate::storage::Storage;
 use async_trait::async_trait;
-use serde::{de::DeserializeOwned, Serialize};
 use tonic::transport::Channel;
 
 /// Wrapper around the Vault Storage gRPC client.
@@ -63,7 +62,11 @@ impl VaultStorageImpl {
     }
 
     /// Store a value in storage with seal-wrap enabled.
-    pub async fn put_seal_wrapped(&self, key: &str, value: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn put_seal_wrapped(
+        &self,
+        key: &str,
+        value: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let resp = self
             .client
             .clone()
@@ -138,7 +141,11 @@ impl VaultStorageImpl {
     }
 
     /// Helper: serialize to JSON and store.
-    pub async fn put_json<T: serde::Serialize>(&self, key: &str, value: &T) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn put_json<T: serde::Serialize>(
+        &self,
+        key: &str,
+        value: &T,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let data = serde_json::to_vec(value)?;
         self.put(key, &data).await
     }
@@ -172,7 +179,11 @@ impl Storage for VaultStorageImpl {
         VaultStorageImpl::list(self, prefix).await
     }
 
-    async fn put_sealed(&self, key: &str, value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn put_sealed(
+        &self,
+        key: &str,
+        value: Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         VaultStorageImpl::put_seal_wrapped(self, key, &value).await
     }
 }

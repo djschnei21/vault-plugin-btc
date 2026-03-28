@@ -50,9 +50,11 @@ pub fn to_public_descriptor(private_desc: &str) -> Result<String, Error> {
     use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 
     // Parse the private descriptor, extracting public keys
-    let (desc, _keymap) =
-        Descriptor::<DescriptorPublicKey>::parse_descriptor(&bitcoin::secp256k1::Secp256k1::new(), private_desc)
-            .map_err(|e| Error::InvalidDescriptor(e.to_string()))?;
+    let (desc, _keymap) = Descriptor::<DescriptorPublicKey>::parse_descriptor(
+        &bitcoin::secp256k1::Secp256k1::new(),
+        private_desc,
+    )
+    .map_err(|e| Error::InvalidDescriptor(e.to_string()))?;
 
     Ok(desc.to_string())
 }
@@ -74,7 +76,8 @@ mod tests {
     #[test]
     fn test_build_native_segwit_testnet() {
         let xprv = test_xprv(Network::Testnet);
-        let (ext, int) = build_descriptors(&xprv, AddressType::NativeSegwit, Network::Testnet).unwrap();
+        let (ext, int) =
+            build_descriptors(&xprv, AddressType::NativeSegwit, Network::Testnet).unwrap();
         assert!(ext.starts_with("wpkh("));
         assert!(ext.contains("/84h/1h/0h/0/*"));
         assert!(int.contains("/84h/1h/0h/1/*"));
@@ -100,7 +103,8 @@ mod tests {
     #[test]
     fn test_build_nested_segwit() {
         let xprv = test_xprv(Network::Testnet);
-        let (ext, _) = build_descriptors(&xprv, AddressType::NestedSegwit, Network::Testnet).unwrap();
+        let (ext, _) =
+            build_descriptors(&xprv, AddressType::NestedSegwit, Network::Testnet).unwrap();
         assert!(ext.starts_with("sh(wpkh("));
         assert!(ext.contains("/49h/1h/0h/0/*"));
     }
@@ -108,33 +112,51 @@ mod tests {
     #[test]
     fn test_to_public_descriptor() {
         let xprv = test_xprv(Network::Testnet);
-        let (ext_priv, _) = build_descriptors(&xprv, AddressType::NativeSegwit, Network::Testnet).unwrap();
+        let (ext_priv, _) =
+            build_descriptors(&xprv, AddressType::NativeSegwit, Network::Testnet).unwrap();
         let ext_pub = to_public_descriptor(&ext_priv).unwrap();
         // Public descriptor should not contain xprv
-        assert!(!ext_pub.contains("tprv"), "public descriptor should not contain private key");
+        assert!(
+            !ext_pub.contains("tprv"),
+            "public descriptor should not contain private key"
+        );
         assert!(ext_pub.starts_with("wpkh("));
         // Should contain tpub (testnet xpub)
-        assert!(ext_pub.contains("tpub"), "public descriptor should contain tpub");
+        assert!(
+            ext_pub.contains("tpub"),
+            "public descriptor should contain tpub"
+        );
     }
 
     #[test]
     fn test_descriptors_valid_for_bdk() {
         let xprv = test_xprv(Network::Testnet);
-        for addr_type in [AddressType::Legacy, AddressType::NestedSegwit, AddressType::NativeSegwit, AddressType::Taproot] {
+        for addr_type in [
+            AddressType::Legacy,
+            AddressType::NestedSegwit,
+            AddressType::NativeSegwit,
+            AddressType::Taproot,
+        ] {
             let (ext, int) = build_descriptors(&xprv, addr_type, Network::Testnet).unwrap();
 
             // Should be able to create a BDK wallet from these descriptors
             let wallet = bdk_wallet::Wallet::create(ext, int)
                 .network(Network::Testnet)
                 .create_wallet_no_persist();
-            assert!(wallet.is_ok(), "BDK wallet creation failed for {:?}: {:?}", addr_type, wallet.err());
+            assert!(
+                wallet.is_ok(),
+                "BDK wallet creation failed for {:?}: {:?}",
+                addr_type,
+                wallet.err()
+            );
         }
     }
 
     #[test]
     fn test_address_generation_from_descriptors() {
         let xprv = test_xprv(Network::Testnet);
-        let (ext, int) = build_descriptors(&xprv, AddressType::NativeSegwit, Network::Testnet).unwrap();
+        let (ext, int) =
+            build_descriptors(&xprv, AddressType::NativeSegwit, Network::Testnet).unwrap();
 
         let wallet = bdk_wallet::Wallet::create(ext, int)
             .network(Network::Testnet)
@@ -144,7 +166,11 @@ mod tests {
         let addr = wallet.peek_address(bdk_wallet::KeychainKind::External, 0);
         let addr_str = addr.address.to_string();
         // Testnet native segwit addresses start with "tb1q"
-        assert!(addr_str.starts_with("tb1q"), "expected tb1q address, got {}", addr_str);
+        assert!(
+            addr_str.starts_with("tb1q"),
+            "expected tb1q address, got {}",
+            addr_str
+        );
     }
 
     #[test]
@@ -160,6 +186,10 @@ mod tests {
         let addr = wallet.peek_address(bdk_wallet::KeychainKind::External, 0);
         let addr_str = addr.address.to_string();
         // Testnet taproot addresses start with "tb1p"
-        assert!(addr_str.starts_with("tb1p"), "expected tb1p address, got {}", addr_str);
+        assert!(
+            addr_str.starts_with("tb1p"),
+            "expected tb1p address, got {}",
+            addr_str
+        );
     }
 }

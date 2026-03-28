@@ -35,6 +35,12 @@ impl BrokerService {
     }
 }
 
+impl Default for BrokerService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[tonic::async_trait]
 impl GrpcBroker for BrokerService {
     type StartStreamStream = ReceiverStream<Result<ConnInfo, Status>>;

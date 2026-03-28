@@ -34,16 +34,16 @@ impl WalletManager {
 
         // Generate or parse mnemonic
         let mnemonic = match mnemonic_phrase {
-            Some(phrase) => Mnemonic::from_str(phrase)
-                .map_err(|e| Error::InvalidMnemonic(e.to_string()))?,
-            None => Mnemonic::generate(24)
-                .map_err(|e| Error::InvalidMnemonic(e.to_string()))?,
+            Some(phrase) => {
+                Mnemonic::from_str(phrase).map_err(|e| Error::InvalidMnemonic(e.to_string()))?
+            }
+            None => Mnemonic::generate(24).map_err(|e| Error::InvalidMnemonic(e.to_string()))?,
         };
 
         // Derive master key
         let seed = mnemonic.to_seed("");
         let xprv = Xpriv::new_master(network, &seed)
-            .map_err(|e| Error::Internal(format!("failed to derive master key: {e}")))?;;
+            .map_err(|e| Error::Internal(format!("failed to derive master key: {e}")))?;
 
         // Build descriptors
         let (ext_desc, int_desc) = build_descriptors(&xprv, address_type, network)?;
@@ -60,7 +60,10 @@ impl WalletManager {
         };
         let secrets_key = format!("wallets/{}/secrets", name);
         let secrets_data = serde_json::to_vec(&secrets)?;
-        storage.put_sealed(&secrets_key, secrets_data).await.map_err(|e| Error::Storage(e.to_string()))?;
+        storage
+            .put_sealed(&secrets_key, secrets_data)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
 
         // Store metadata
         let now = SystemTime::now()
@@ -79,7 +82,10 @@ impl WalletManager {
             next_internal_index: 0,
         };
         let metadata_data = serde_json::to_vec(&metadata)?;
-        storage.put(&meta_key, metadata_data).await.map_err(|e| Error::Storage(e.to_string()))?;
+        storage
+            .put(&meta_key, metadata_data)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
 
         info!(wallet = name, "wallet created");
 
@@ -92,10 +98,13 @@ impl WalletManager {
         name: &str,
     ) -> Result<WalletMetadata, Error> {
         let key = format!("wallets/{}/metadata", name);
-        let data = storage.get(&key).await.map_err(|e| Error::Storage(e.to_string()))?;
+        let data = storage
+            .get(&key)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
         match data {
             Some(d) => {
-                let value: WalletMetadata = serde_json::from_slice(&d).map_err(|e| Error::Serde(e))?;
+                let value: WalletMetadata = serde_json::from_slice(&d).map_err(Error::Serde)?;
                 Ok(value)
             }
             None => Err(Error::WalletNotFound(name.to_string())),
@@ -108,7 +117,10 @@ impl WalletManager {
         name: &str,
     ) -> Result<WalletSecrets, Box<dyn std::error::Error>> {
         let key = format!("wallets/{}/secrets", name);
-        let data = storage.get(&key).await.map_err(|e| Error::Storage(e.to_string()))?;
+        let data = storage
+            .get(&key)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
         match data {
             Some(d) => {
                 let value: WalletSecrets = serde_json::from_slice(&d).map_err(Error::Serde)?;
@@ -134,7 +146,7 @@ impl WalletManager {
         let wallet = Wallet::create(ext_desc, int_desc)
             .network(metadata.network)
             .create_wallet_no_persist()
-            .map_err(|e| Error::Internal(format!("failed to create BDK wallet: {e}")))?;;
+            .map_err(|e| Error::Internal(format!("failed to create BDK wallet: {e}")))?;
 
         Ok((wallet, metadata))
     }
@@ -146,20 +158,32 @@ impl WalletManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let key = format!("wallets/{}/metadata", metadata.name);
         let data = serde_json::to_vec(metadata).map_err(Error::Serde)?;
-        Ok(storage.put(&key, data).await.map_err(|e| Error::Storage(e.to_string()))?)
+        Ok(storage
+            .put(&key, data)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?)
     }
 
     /// Delete a wallet and all associated data.
-    pub async fn delete_wallet(storage: Arc<dyn Storage + Send + Sync>, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn delete_wallet(
+        storage: Arc<dyn Storage + Send + Sync>,
+        name: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Check it exists first
         Self::get_metadata(storage.clone(), name).await?;
 
         // Delete all keys under this wallet
         let prefix = format!("wallets/{}/", name);
-        let keys = storage.list(&prefix).await.map_err(|e| Error::Storage(e.to_string()))?;
+        let keys = storage
+            .list(&prefix)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
         for key in keys {
             let full_key = format!("{}{}", prefix, key);
-            storage.delete(&full_key).await.map_err(|e| Error::Storage(e.to_string()))?;
+            storage
+                .delete(&full_key)
+                .await
+                .map_err(|e| Error::Storage(e.to_string()))?;
         }
 
         info!(wallet = name, "wallet deleted");
@@ -167,8 +191,13 @@ impl WalletManager {
     }
 
     /// List all wallet names.
-    pub async fn list_wallets(storage: Arc<dyn Storage + Send + Sync>) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let keys = storage.list("wallets/").await.map_err(|e| Error::Storage(e.to_string()))?;
+    pub async fn list_wallets(
+        storage: Arc<dyn Storage + Send + Sync>,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let keys = storage
+            .list("wallets/")
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
         // Keys returned by vault list are the immediate children under the prefix.
         // For "wallets/", we get entries like "my-wallet/" - strip the trailing slash.
         let names: Vec<String> = keys

@@ -23,6 +23,9 @@ pub enum Error {
     #[error("invalid PSBT: {0}")]
     InvalidPsbt(String),
 
+    #[error("invalid network: {0}")]
+    InvalidNetwork(String),
+
     #[error("invalid request: {0}")]
     InvalidRequest(String),
 
@@ -51,6 +54,12 @@ pub enum Error {
     Other(Box<dyn std::error::Error>),
 }
 
+impl From<Box<dyn std::error::Error>> for Error {
+    fn from(e: Box<dyn std::error::Error>) -> Self {
+        Error::Other(e)
+    }
+}
+
 impl Error {
     /// Convert to a Vault ProtoError for gRPC responses.
     pub fn to_proto_error(&self) -> pb::ProtoError {
@@ -60,6 +69,7 @@ impl Error {
             Error::InvalidMnemonic(_) => (7, 400),
             Error::InvalidDescriptor(_) => (7, 400),
             Error::InvalidPsbt(_) => (7, 400),
+            Error::InvalidNetwork(_) => (7, 400),
             Error::InvalidRequest(_) => (7, 400),
             Error::UnsupportedPath(_) => (6, 404), // ErrTypeUnsupportedPath
             Error::UnsupportedOperation(_, _) => (5, 405), // ErrTypeUnsupportedOperation
@@ -77,12 +87,6 @@ impl Error {
             err_msg: self.to_string(),
             err_code: code,
         }
-    }
-}
-
-impl From<Box<dyn std::error::Error>> for Error {
-    fn from(e: Box<dyn std::error::Error>) -> Self {
-        Error::Other(e)
     }
 }
 

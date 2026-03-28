@@ -1,27 +1,173 @@
+use super::validation::validate_json;
 use crate::error::Error;
 use crate::handlers::ok_response;
 use crate::proto::pb::Response as PbResponse;
 use crate::router::HandlerContext;
 use base64::Engine;
 use bitcoin::psbt::Psbt;
+use serde::Deserialize;
+use tracing::{error, info};
+
+#[derive(Deserialize)]
+struct PsbtStringRequest {
+    psbt: String,
+}
+
+#[derive(Deserialize)]
+struct CombinePsbtRequest {
+    psbts: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct CreatePsbtInput {
+    txid: String,
+    vout: u32,
+}
+
+#[derive(Deserialize)]
+struct CreatePsbtOutput {
+    address: String,
+    amount: u64,
+}
+
+#[derive(Deserialize)]
+struct CreatePsbtRequest {
+    inputs: Vec<CreatePsbtInput>,
+    outputs: Vec<CreatePsbtOutput>,
+}
+
+fn parse_psbt_string_request(data: &serde_json::Value) -> Result<PsbtStringRequest, Error> {
+    if data.get("psbt").is_none() {
+        return Err(Error::InvalidRequest(
+            "missing 'psbt' parameter".to_string(),
+        ));
+    }
+
+    validate_json(data)
+}
+
+fn validate_combine_psbt_entries(data: &serde_json::Value) -> Result<(), Error> {
+    let Some(psbts) = data.get("psbts").and_then(serde_json::Value::as_array) else {
+        return Ok(());
+    };
+
+    for (i, psbt) in psbts.iter().enumerate() {
+        if !psbt.is_string() {
+            return Err(Error::InvalidRequest(format!(
+                "psbt at index {i} is not a string"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_create_psbt_entries(data: &serde_json::Value) -> Result<(), Error> {
+    fn validate_nested_field(
+        object: &serde_json::Map<String, serde_json::Value>,
+        entry_kind: &str,
+        index: usize,
+        field: &str,
+        expected_type: &str,
+        is_valid: impl FnOnce(&serde_json::Value) -> bool,
+    ) -> Result<(), Error> {
+        let Some(value) = object.get(field) else {
+            return Err(Error::InvalidRequest(format!(
+                "{entry_kind} {index}: missing '{field}'"
+            )));
+        };
+
+        if !is_valid(value) {
+            return Err(Error::InvalidRequest(format!(
+                "{entry_kind} {index}: '{field}' must be a {expected_type}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    if let Some(inputs) = data.get("inputs").and_then(serde_json::Value::as_array) {
+        for (i, input) in inputs.iter().enumerate() {
+            let Some(input) = input.as_object() else {
+                return Err(Error::InvalidRequest(format!("input {i} is not an object")));
+            };
+
+            validate_nested_field(input, "input", i, "txid", "string", |value| {
+                value.is_string()
+            })?;
+            validate_nested_field(input, "input", i, "vout", "u32", |value| {
+                value
+                    .as_u64()
+                    .is_some_and(|vout| u32::try_from(vout).is_ok())
+            })?;
+        }
+    }
+
+    if let Some(outputs) = data.get("outputs").and_then(serde_json::Value::as_array) {
+        for (i, output) in outputs.iter().enumerate() {
+            let Some(output) = output.as_object() else {
+                return Err(Error::InvalidRequest(format!(
+                    "output {i} is not an object"
+                )));
+            };
+
+            validate_nested_field(output, "output", i, "address", "string", |value| {
+                value.is_string()
+            })?;
+            validate_nested_field(output, "output", i, "amount", "u64", |value| {
+                value.as_u64().is_some()
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_combine_psbt_request(data: &serde_json::Value) -> Result<CombinePsbtRequest, Error> {
+    if data.get("psbts").is_none() {
+        return Err(Error::InvalidRequest(
+            "missing 'psbts' array parameter".to_string(),
+        ));
+    }
+
+    validate_combine_psbt_entries(data)?;
+
+    validate_json(data)
+}
+
+fn parse_create_psbt_request(data: &serde_json::Value) -> Result<CreatePsbtRequest, Error> {
+    if data.get("inputs").is_none() {
+        return Err(Error::InvalidRequest("missing 'inputs' array".to_string()));
+    }
+    if data.get("outputs").is_none() {
+        return Err(Error::InvalidRequest("missing 'outputs' array".to_string()));
+    }
+
+    validate_create_psbt_entries(data)?;
+
+    validate_json(data)
+}
 
 /// POST /psbt/decode - Decode and inspect a PSBT.
 ///
 /// Request data:
 /// - `psbt`: Base64-encoded PSBT string
 pub async fn decode_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
-    let psbt_b64 = ctx
-        .data
-        .get("psbt")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::InvalidRequest("missing 'psbt' parameter".to_string()))?;
+    let request = parse_psbt_string_request(&ctx.data)?;
+
+    info!("Decoding PSBT");
 
     let psbt_bytes = base64::engine::general_purpose::STANDARD
-        .decode(psbt_b64)
-        .map_err(|e| Error::InvalidPsbt(format!("invalid base64: {e}")))?;
+        .decode(&request.psbt)
+        .map_err(|e| {
+            error!(error = %e, "Invalid PSBT base64 for decode");
+            Error::InvalidPsbt(format!("invalid base64: {e}"))
+        })?;
 
-    let psbt = Psbt::deserialize(&psbt_bytes)
-        .map_err(|e| Error::InvalidPsbt(format!("invalid PSBT: {e}")))?;
+    let psbt = Psbt::deserialize(&psbt_bytes).map_err(|e| {
+        error!(error = %e, "Invalid PSBT for decode");
+        Error::InvalidPsbt(format!("invalid PSBT: {e}"))
+    })?;
 
     // Extract information from the PSBT
     let inputs: Vec<serde_json::Value> = psbt
@@ -96,29 +242,28 @@ pub async fn decode_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
 /// Request data:
 /// - `psbts`: Array of base64-encoded PSBT strings
 pub async fn combine_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
-    let psbts_val = ctx
-        .data
-        .get("psbts")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::InvalidRequest("missing 'psbts' array parameter".to_string()))?;
+    let request = parse_combine_psbt_request(&ctx.data)?;
 
-    if psbts_val.is_empty() {
+    info!(psbt_count = request.psbts.len(), "Combining PSBTs");
+
+    if request.psbts.is_empty() {
         return Err(Error::InvalidRequest("empty psbts array".to_string()));
     }
 
     let mut base_psbt: Option<Psbt> = None;
 
-    for (i, psbt_val) in psbts_val.iter().enumerate() {
-        let psbt_b64 = psbt_val.as_str().ok_or_else(|| {
-            Error::InvalidRequest(format!("psbt at index {i} is not a string"))
-        })?;
-
+    for (i, psbt_b64) in request.psbts.iter().enumerate() {
         let psbt_bytes = base64::engine::general_purpose::STANDARD
             .decode(psbt_b64)
-            .map_err(|e| Error::InvalidPsbt(format!("invalid base64 at index {i}: {e}")))?;
+            .map_err(|e| {
+                error!(index = i, error = %e, "Invalid PSBT base64 for combine");
+                Error::InvalidPsbt(format!("invalid base64 at index {i}: {e}"))
+            })?;
 
-        let psbt = Psbt::deserialize(&psbt_bytes)
-            .map_err(|e| Error::InvalidPsbt(format!("invalid PSBT at index {i}: {e}")))?;
+        let psbt = Psbt::deserialize(&psbt_bytes).map_err(|e| {
+            error!(index = i, error = %e, "Invalid PSBT for combine");
+            Error::InvalidPsbt(format!("invalid PSBT at index {i}: {e}"))
+        })?;
 
         match &mut base_psbt {
             None => base_psbt = Some(psbt),
@@ -130,8 +275,7 @@ pub async fn combine_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
     }
 
     let combined = base_psbt.unwrap();
-    let combined_b64 =
-        base64::engine::general_purpose::STANDARD.encode(combined.serialize());
+    let combined_b64 = base64::engine::general_purpose::STANDARD.encode(combined.serialize());
 
     Ok(ok_response(serde_json::json!({
         "psbt": combined_b64,
@@ -145,18 +289,21 @@ pub async fn combine_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
 /// Request data:
 /// - `psbt`: Base64-encoded PSBT string
 pub async fn finalize_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
-    let psbt_b64 = ctx
-        .data
-        .get("psbt")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::InvalidRequest("missing 'psbt' parameter".to_string()))?;
+    let request = parse_psbt_string_request(&ctx.data)?;
+
+    info!("Finalizing PSBT");
 
     let psbt_bytes = base64::engine::general_purpose::STANDARD
-        .decode(psbt_b64)
-        .map_err(|e| Error::InvalidPsbt(format!("invalid base64: {e}")))?;
+        .decode(&request.psbt)
+        .map_err(|e| {
+            error!(error = %e, "Invalid PSBT base64 for finalize");
+            Error::InvalidPsbt(format!("invalid base64: {e}"))
+        })?;
 
-    let psbt = Psbt::deserialize(&psbt_bytes)
-        .map_err(|e| Error::InvalidPsbt(format!("invalid PSBT: {e}")))?;
+    let psbt = Psbt::deserialize(&psbt_bytes).map_err(|e| {
+        error!(error = %e, "Invalid PSBT for finalize");
+        Error::InvalidPsbt(format!("invalid PSBT: {e}"))
+    })?;
 
     // Try to extract the transaction (this only works if all inputs are finalized)
     match psbt.extract_tx() {
@@ -194,65 +341,43 @@ pub async fn create_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
     use bitcoin::{Amount, OutPoint, Transaction, TxIn, TxOut, Txid};
     use std::str::FromStr;
 
-    let inputs_val = ctx
-        .data
-        .get("inputs")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::InvalidRequest("missing 'inputs' array".to_string()))?;
+    let request = parse_create_psbt_request(&ctx.data)?;
 
-    let outputs_val = ctx
-        .data
-        .get("outputs")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| Error::InvalidRequest("missing 'outputs' array".to_string()))?;
+    info!(
+        input_count = request.inputs.len(),
+        output_count = request.outputs.len(),
+        "Creating PSBT"
+    );
 
-    if inputs_val.is_empty() {
+    if request.inputs.is_empty() {
         return Err(Error::InvalidRequest("inputs array is empty".to_string()));
     }
-    if outputs_val.is_empty() {
+    if request.outputs.is_empty() {
         return Err(Error::InvalidRequest("outputs array is empty".to_string()));
     }
 
     // Parse inputs
     let mut tx_inputs = Vec::new();
-    for (i, input) in inputs_val.iter().enumerate() {
-        let txid_str = input
-            .get("txid")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| Error::InvalidRequest(format!("input {i}: missing 'txid'")))?;
-        let vout = input
-            .get("vout")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| Error::InvalidRequest(format!("input {i}: missing 'vout'")))?
-            as u32;
-
-        let txid = Txid::from_str(txid_str)
+    for (i, input) in request.inputs.iter().enumerate() {
+        let txid = Txid::from_str(&input.txid)
             .map_err(|e| Error::InvalidRequest(format!("input {i}: invalid txid: {e}")))?;
 
         tx_inputs.push(TxIn {
-            previous_output: OutPoint::new(txid, vout),
+            previous_output: OutPoint::new(txid, input.vout),
             ..Default::default()
         });
     }
 
     // Parse outputs
     let mut tx_outputs = Vec::new();
-    for (i, output) in outputs_val.iter().enumerate() {
-        let address_str = output
-            .get("address")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| Error::InvalidRequest(format!("output {i}: missing 'address'")))?;
-        let amount_sats = output
-            .get("amount")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| Error::InvalidRequest(format!("output {i}: missing 'amount'")))?;
-
-        let address: bitcoin::Address<bitcoin::address::NetworkUnchecked> = address_str
+    for (i, output) in request.outputs.iter().enumerate() {
+        let address: bitcoin::Address<bitcoin::address::NetworkUnchecked> = output
+            .address
             .parse()
             .map_err(|e| Error::InvalidRequest(format!("output {i}: invalid address: {e}")))?;
 
         tx_outputs.push(TxOut {
-            value: Amount::from_sat(amount_sats),
+            value: Amount::from_sat(output.amount),
             script_pubkey: address.assume_checked().script_pubkey(),
         });
     }
@@ -275,4 +400,218 @@ pub async fn create_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
         "psbt": psbt_b64,
         "txid": psbt.unsigned_tx.compute_txid().to_string(),
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::Storage;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    struct NoopStorage;
+
+    #[async_trait]
+    impl Storage for NoopStorage {
+        async fn get(&self, _key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+            Ok(None)
+        }
+
+        async fn put(&self, _key: &str, _value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+            Ok(())
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), Box<dyn std::error::Error>> {
+            Ok(())
+        }
+
+        async fn list(&self, _prefix: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+            Ok(vec![])
+        }
+
+        async fn put_sealed(
+            &self,
+            _key: &str,
+            _value: Vec<u8>,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            Ok(())
+        }
+    }
+
+    fn test_context(data: serde_json::Value) -> HandlerContext {
+        HandlerContext {
+            params: HashMap::new(),
+            data,
+            storage: Arc::new(NoopStorage),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_decode_psbt_missing_psbt_returns_specific_error() {
+        let err = decode_psbt(test_context(serde_json::json!({})))
+            .await
+            .expect_err("missing psbt should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "missing 'psbt' parameter"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_finalize_psbt_missing_psbt_returns_specific_error() {
+        let err = finalize_psbt(test_context(serde_json::json!({})))
+            .await
+            .expect_err("missing psbt should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "missing 'psbt' parameter"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_combine_psbt_missing_psbts_returns_specific_error() {
+        let err = combine_psbt(test_context(serde_json::json!({})))
+            .await
+            .expect_err("missing psbts should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "missing 'psbts' array parameter"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_combine_psbt_rejects_non_string_entries() {
+        let err = combine_psbt(test_context(serde_json::json!({
+            "psbts": [123]
+        })))
+        .await
+        .expect_err("non-string psbt entries should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "psbt at index 0 is not a string"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_create_psbt_missing_inputs_returns_specific_error() {
+        let err = create_psbt(test_context(serde_json::json!({
+            "outputs": []
+        })))
+        .await
+        .expect_err("missing inputs should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "missing 'inputs' array"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_create_psbt_missing_outputs_returns_specific_error() {
+        let err = create_psbt(test_context(serde_json::json!({
+            "inputs": []
+        })))
+        .await
+        .expect_err("missing outputs should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "missing 'outputs' array"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_create_psbt_rejects_input_missing_txid() {
+        let err = create_psbt(test_context(serde_json::json!({
+            "inputs": [{"vout": 0}],
+            "outputs": [{"address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", "amount": 1}]
+        })))
+        .await
+        .expect_err("input missing txid should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "input 0: missing 'txid'"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_create_psbt_rejects_input_txid_wrong_type() {
+        let err = create_psbt(test_context(serde_json::json!({
+            "inputs": [{"txid": 123, "vout": 0}],
+            "outputs": [{"address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", "amount": 1}]
+        })))
+        .await
+        .expect_err("input txid wrong type should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "input 0: 'txid' must be a string"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_create_psbt_rejects_input_vout_wrong_type() {
+        let err = create_psbt(test_context(serde_json::json!({
+            "inputs": [{"txid": "0000000000000000000000000000000000000000000000000000000000000000", "vout": "0"}],
+            "outputs": [{"address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", "amount": 1}]
+        })))
+        .await
+        .expect_err("input vout wrong type should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "input 0: 'vout' must be a u32"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_create_psbt_rejects_output_missing_amount() {
+        let err = create_psbt(test_context(serde_json::json!({
+            "inputs": [{"txid": "0000000000000000000000000000000000000000000000000000000000000000", "vout": 0}],
+            "outputs": [{"address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"}]
+        })))
+        .await
+        .expect_err("output missing amount should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "output 0: missing 'amount'"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_create_psbt_rejects_output_address_wrong_type() {
+        let err = create_psbt(test_context(serde_json::json!({
+            "inputs": [{"txid": "0000000000000000000000000000000000000000000000000000000000000000", "vout": 0}],
+            "outputs": [{"address": 123, "amount": 1}]
+        })))
+        .await
+        .expect_err("output address wrong type should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "output 0: 'address' must be a string"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_create_psbt_rejects_output_amount_wrong_type() {
+        let err = create_psbt(test_context(serde_json::json!({
+            "inputs": [{"txid": "0000000000000000000000000000000000000000000000000000000000000000", "vout": 0}],
+            "outputs": [{"address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", "amount": "1"}]
+        })))
+        .await
+        .expect_err("output amount wrong type should fail");
+
+        assert!(matches!(
+            err,
+            Error::InvalidRequest(message) if message == "output 0: 'amount' must be a u64"
+        ));
+    }
 }

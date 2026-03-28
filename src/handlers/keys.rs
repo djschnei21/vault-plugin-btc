@@ -55,8 +55,7 @@ pub async fn derive_key(ctx: HandlerContext) -> Result<PbResponse, Error> {
     };
 
     // Parse the derivation path
-    let derivation: Vec<ChildNumber> = if path_str.starts_with("m/") || path_str.starts_with("M/")
-    {
+    let derivation: Vec<ChildNumber> = if path_str.starts_with("m/") || path_str.starts_with("M/") {
         let dp = DerivationPath::from_str(path_str)
             .map_err(|e| Error::InvalidRequest(format!("invalid derivation path: {e}")))?;
         dp.into_iter().copied().collect()

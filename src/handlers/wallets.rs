@@ -1,4 +1,4 @@
-use crate::config::PluginConfig;
+use super::validation::validate_json;
 use crate::error::Error;
 use crate::handlers::{empty_response, list_response, ok_response};
 use crate::proto::pb::Response as PbResponse;
@@ -6,8 +6,8 @@ use crate::router::HandlerContext;
 use crate::wallet::manager::WalletManager;
 use crate::wallet::types::AddressType;
 use serde::Deserialize;
-use super::validation::validate_json;
-use tracing::{info, error};
+use std::str::FromStr;
+use tracing::{error, info};
 
 #[derive(Deserialize)]
 struct CreateWalletRequest {
@@ -33,40 +33,17 @@ pub async fn create_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
         return Err(Error::InvalidNetwork(request.network));
     }
 
-    let network = bitcoin::Network::from_str(&request.network).unwrap();
+    let network = match request.network.as_str() {
+        "mainnet" => bitcoin::Network::Bitcoin,
+        "testnet" => bitcoin::Network::Testnet,
+        "signet" => bitcoin::Network::Signet,
+        "regtest" => bitcoin::Network::Regtest,
+        _ => return Err(Error::InvalidNetwork(request.network.clone())),
+    };
 
     let address_type = if let Some(at_str) = &request.address_type {
         AddressType::from_str(at_str)
-            .ok_or_else(|| Error::InvalidRequest(format!("invalid address_type: {at_str}")))
-    } else {
-        Ok(AddressType::default())
-    }?;
-
-    let mnemonic = request.mnemonic;
-
-    let metadata = WalletManager::create_wallet(
-        &ctx.storage,
-        &name,
-        network,
-        address_type,
-        mnemonic.as_deref(),
-    ).await?;
-
-    info!("Wallet created successfully: {}", name);
-
-    Ok(ok_response(serde_json::json!({
-        "name": metadata.name,
-        "network": metadata.network.to_string(),
-        "address_type": metadata.address_type.to_string(),
-        "created_at": metadata.created_at
-    })))
-}
-
-    let network = bitcoin::Network::from_str(&request.network).unwrap();
-
-    let address_type = if let Some(at_str) = &request.address_type {
-        AddressType::from_str(at_str)
-            .ok_or_else(|| Error::InvalidRequest(format!("invalid address_type: {at_str}")))
+            .map_err(|_| Error::InvalidRequest(format!("invalid address_type: {at_str}")))
     } else {
         Ok(AddressType::default())
     }?;
@@ -82,14 +59,13 @@ pub async fn create_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
     )
     .await?;
 
-    // Return public metadata only (never expose mnemonic or private descriptors)
+    info!("Wallet created successfully: {}", name);
+
     Ok(ok_response(serde_json::json!({
         "name": metadata.name,
         "network": metadata.network.to_string(),
         "address_type": metadata.address_type,
-        "created_at": metadata.created_at,
-        "external_descriptor": metadata.external_descriptor_public,
-        "internal_descriptor": metadata.internal_descriptor_public,
+        "created_at": metadata.created_at
     })))
 }
 
