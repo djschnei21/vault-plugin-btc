@@ -11,7 +11,7 @@ allocation protection with storage-coordinated cross-process safety.
 This design covers three remediation tracks that were explicitly left in the backlog:
 
 - `sign` and `sign-raw` admission-control hardening.
-- Descriptor disclosure reduction for normal wallet key reads.
+- Descriptor disclosure reduction for normal wallet and key reads.
 - Cross-process-safe address allocation.
 
 This design stays within the remote API attacker threat model already defined by the audit.
@@ -61,8 +61,8 @@ policy layer so a remote caller cannot rely on implicit library behavior for aut
 
 ### 2. Descriptor Disclosure Reduction
 
-`src/handlers/keys.rs` stops returning full public descriptors on the standard
-`GET /wallets/:name/keys` path.
+`src/handlers/wallets.rs` and `src/handlers/keys.rs` stop returning full public descriptors on the
+standard `GET /wallets/:name` and `GET /wallets/:name/keys` paths.
 
 The default response becomes minimal wallet identity metadata:
 
@@ -76,7 +76,7 @@ The existing derive endpoint remains available, but only for the already-audited
 single unhardened index relative to a named keychain.
 
 This keeps normal operational introspection while avoiding disclosure of reusable public wallet
-structure to any caller who can hit the endpoint.
+structure to any caller who can hit either endpoint.
 
 ### 3. Cross-Process Address Reservation
 
@@ -117,12 +117,12 @@ No private material storage changes are required.
 
 ## Request and Response Changes
 
-### `GET /wallets/:name/keys`
+### `GET /wallets/:name` and `GET /wallets/:name/keys`
 
 Current behavior exposes `external_descriptor` and `internal_descriptor`.
 
 New behavior returns minimal metadata only. This is a deliberate response-shape change because the
-existing default is treated as over-disclosure in the audited threat model.
+existing defaults are treated as over-disclosure in the audited threat model.
 
 ### `POST /wallets/:name/sign`
 
@@ -161,6 +161,7 @@ Add focused regression coverage in separate security-oriented test files.
 
 ### Descriptor Disclosure Tests
 
+- `GET /wallets/:name` no longer includes descriptor strings.
 - `GET /wallets/:name/keys` no longer includes descriptor strings.
 - Expected minimal metadata fields remain present.
 - `keys/derive` still works for valid single-index requests.
@@ -189,7 +190,7 @@ changing storage coordination behavior.
 This remediation is complete when:
 
 - Signing endpoints reject unsupported-policy or context-ambiguous requests before invoking signing.
-- Standard key-read responses do not disclose public descriptors.
+- Standard wallet and key-read responses do not disclose public descriptors.
 - Address allocation is protected against duplicate reservation across multiple plugin processes
   sharing storage.
 - Each new protection has regression coverage.
