@@ -8,22 +8,29 @@ const CONFIG_KEY: &str = "config/plugin";
 
 /// GET /config - Read the current plugin configuration.
 pub async fn read_config(ctx: HandlerContext) -> Result<PbResponse, Error> {
-    let config: PluginConfig = ctx
+    let data = ctx
         .storage
-        .get_json(CONFIG_KEY)
-        .await?
-        .unwrap_or_default();
-
+        .get(CONFIG_KEY)
+        .await
+        .map_err(|e| Error::Storage(e.to_string()))?;
+    let config: PluginConfig = match data {
+        Some(d) => serde_json::from_slice(&d).map_err(|e| Error::Serde(e))?,
+        None => PluginConfig::default(),
+    };
     Ok(ok_response(serde_json::to_value(&config)?))
 }
 
 /// POST /config - Set the plugin configuration.
 pub async fn write_config(ctx: HandlerContext) -> Result<PbResponse, Error> {
-    let mut config: PluginConfig = ctx
+    let data = ctx
         .storage
-        .get_json(CONFIG_KEY)
-        .await?
-        .unwrap_or_default();
+        .get(CONFIG_KEY)
+        .await
+        .map_err(|e| Error::Storage(e.to_string()))?;
+    let mut config: PluginConfig = match data {
+        Some(d) => serde_json::from_slice(&d).map_err(|e| Error::Serde(e))?,
+        None => PluginConfig::default(),
+    };
 
     // Update fields from request data
     if let Some(network) = ctx.data.get("network").and_then(|v| v.as_str()) {
@@ -40,7 +47,8 @@ pub async fn write_config(ctx: HandlerContext) -> Result<PbResponse, Error> {
         }
     }
 
-    ctx.storage.put_json(CONFIG_KEY, &config).await?;
+    let config_data = serde_json::to_vec(&config).map_err(|e| Error::Serde(e))?;
+    ctx.storage.put(CONFIG_KEY, config_data).await.map_err(|e| Error::Storage(e.to_string()))?;
 
     Ok(ok_response(serde_json::to_value(&config)?))
 }

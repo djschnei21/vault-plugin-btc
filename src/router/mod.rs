@@ -3,7 +3,7 @@ pub mod paths;
 use crate::error::Error;
 use crate::handlers;
 use crate::proto::pb::{Request as PbRequest, Response as PbResponse};
-use crate::storage::VaultStorage;
+use crate::storage::Storage;
 use paths::PathPattern;
 use std::collections::HashMap;
 use std::future::Future;
@@ -40,7 +40,7 @@ pub struct HandlerContext {
     pub path: String,
     pub params: HashMap<String, String>,
     pub data: serde_json::Value,
-    pub storage: VaultStorage,
+    pub storage: Arc<dyn Storage + Send + Sync>,
 }
 
 /// Type alias for async handler functions.
@@ -101,7 +101,7 @@ impl Router {
     pub async fn route(
         &self,
         request: &PbRequest,
-        storage: &VaultStorage,
+        storage: Arc<dyn Storage + Send + Sync>,
     ) -> Result<PbResponse, Error> {
         let operation = Operation::from_str(&request.operation)
             .ok_or_else(|| Error::UnsupportedOperation(request.operation.clone(), request.path.clone()))?;

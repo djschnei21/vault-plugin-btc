@@ -46,33 +46,43 @@ pub enum Error {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    #[error("other error: {0}")]
+    Other(Box<dyn std::error::Error>),
 }
 
 impl Error {
     /// Convert to a Vault ProtoError for gRPC responses.
     pub fn to_proto_error(&self) -> pb::ProtoError {
         let (err_type, code) = match self {
-            Error::WalletNotFound(_) => (7, 404),        // ErrTypeInvalidRequest
-            Error::WalletAlreadyExists(_) => (7, 400),   // ErrTypeInvalidRequest
+            Error::WalletNotFound(_) => (7, 404), // ErrTypeInvalidRequest
+            Error::WalletAlreadyExists(_) => (7, 400), // ErrTypeInvalidRequest
             Error::InvalidMnemonic(_) => (7, 400),
             Error::InvalidDescriptor(_) => (7, 400),
             Error::InvalidPsbt(_) => (7, 400),
             Error::InvalidRequest(_) => (7, 400),
-            Error::UnsupportedPath(_) => (6, 404),       // ErrTypeUnsupportedPath
+            Error::UnsupportedPath(_) => (6, 404), // ErrTypeUnsupportedPath
             Error::UnsupportedOperation(_, _) => (5, 405), // ErrTypeUnsupportedOperation
             Error::NotConfigured(_) => (7, 400),
-            Error::Storage(_) => (2, 500),               // ErrTypeInternalError
+            Error::Storage(_) => (2, 500), // ErrTypeInternalError
             Error::Broker(_) => (2, 500),
             Error::Internal(_) => (2, 500),
             Error::Serde(_) => (2, 500),
             Error::SigningError(_) => (2, 500),
             Error::ConfigError(_) => (7, 400),
+            Error::Other(_) => (2, 500),
         };
         pb::ProtoError {
             err_type,
             err_msg: self.to_string(),
             err_code: code,
         }
+    }
+}
+
+impl From<Box<dyn std::error::Error>> for Error {
+    fn from(e: Box<dyn std::error::Error>) -> Self {
+        Error::Other(e)
     }
 }
 

@@ -13,7 +13,7 @@ pub async fn get_keys(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .get("name")
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?;
 
-    let metadata = WalletManager::get_metadata(&ctx.storage, name).await?;
+    let metadata = WalletManager::get_metadata(ctx.storage.clone(), name).await?;
 
     Ok(ok_response(serde_json::json!({
         "name": metadata.name,
@@ -46,7 +46,7 @@ pub async fn derive_key(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .and_then(|v| v.as_str())
         .unwrap_or("external");
 
-    let (wallet, metadata) = WalletManager::load_bdk_wallet(&ctx.storage, name).await?;
+    let (wallet, metadata) = WalletManager::load_bdk_wallet(ctx.storage.clone(), name).await?;
 
     // Get the appropriate descriptor's public key
     let descriptor = match keychain {

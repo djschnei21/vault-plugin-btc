@@ -1,13 +1,8 @@
 use crate::error::Error;
-use crate::proto::pb::{
-    backend_server::Backend, storage_client::StorageClient, Empty, HandleExistenceCheckArgs,
-    HandleExistenceCheckReply, HandleRequestArgs, HandleRequestReply, InitializeArgs,
-    InitializeReply, InvalidateKeyArgs, Paths, SetupArgs, SetupReply,
-    SpecialPathsReply, TypeReply,
-};
+use crate::proto::pb;
 use crate::router::Router;
 use crate::server::broker_service::BrokerService;
-use crate::storage::VaultStorage;
+use crate::storage::{Storage, VaultStorage};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::transport::Channel;
@@ -146,7 +141,7 @@ impl Backend for BackendService {
 
         debug!(operation = %operation, path = %path, "handling request");
 
-        match self.router.route(&pb_request, &storage).await {
+        match self.router.route(&pb_request, Arc::new(storage) as Arc<dyn Storage + Send + Sync>).await {
             Ok(response) => Ok(Response::new(HandleRequestReply {
                 response: Some(response),
                 err: None,
@@ -205,10 +200,19 @@ impl Backend for BackendService {
                         }));
                     }
                     Err(e) => {
+                        let proto_err = if let Ok(err) = e.downcast::<Error>() {
+                            err.to_proto_error()
+                        } else {
+                            pb::ProtoError {
+                                err_type: 2,
+                                err_msg: e.to_string(),
+                                err_code: 500,
+                            }
+                        };
                         return Ok(Response::new(HandleExistenceCheckReply {
                             check_found: false,
                             exists: false,
-                            err: Some(e.to_proto_error()),
+                            err: Some(proto_err),
                         }));
                     }
                 }

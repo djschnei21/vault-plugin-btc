@@ -20,11 +20,15 @@ pub async fn create_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
             .parse()
             .map_err(|_| Error::InvalidRequest(format!("invalid network: {net_str}")))?
     } else {
-        let config: PluginConfig = ctx
+        let data = ctx
             .storage
-            .get_json("config/plugin")
-            .await?
-            .unwrap_or_default();
+            .get("config/plugin")
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let config: PluginConfig = match data {
+            Some(d) => serde_json::from_slice(&d).map_err(|e| Error::Serde(e))?,
+            None => PluginConfig::default(),
+        };
         config.network
     };
 
@@ -45,7 +49,7 @@ pub async fn create_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .map(|s| s.to_string());
 
     let metadata = WalletManager::create_wallet(
-        &ctx.storage,
+        ctx.storage.clone(),
         &name,
         network,
         address_type,
@@ -71,7 +75,7 @@ pub async fn read_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .get("name")
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?;
 
-    let metadata = WalletManager::get_metadata(&ctx.storage, name).await?;
+    let metadata = WalletManager::get_metadata(ctx.storage.clone(), name).await?;
 
     Ok(ok_response(serde_json::json!({
         "name": metadata.name,
@@ -92,13 +96,13 @@ pub async fn delete_wallet(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .get("name")
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?;
 
-    WalletManager::delete_wallet(&ctx.storage, name).await?;
+    WalletManager::delete_wallet(ctx.storage.clone(), name).await?;
 
     Ok(empty_response())
 }
 
 /// LIST /wallets - List all wallet names.
 pub async fn list_wallets(ctx: HandlerContext) -> Result<PbResponse, Error> {
-    let names = WalletManager::list_wallets(&ctx.storage).await?;
+    let names = WalletManager::list_wallets(ctx.storage.clone()).await?;
     Ok(list_response(names))
 }

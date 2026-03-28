@@ -34,7 +34,7 @@ pub async fn sign_psbt(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .map_err(|e| Error::InvalidPsbt(format!("invalid PSBT: {e}")))?;
 
     // Load wallet with private keys
-    let (wallet, _metadata) = WalletManager::load_bdk_wallet(&ctx.storage, name).await?;
+    let (wallet, _metadata) = WalletManager::load_bdk_wallet(ctx.storage.clone(), name).await?;
 
     // Sign
     let finalized = wallet
@@ -83,7 +83,7 @@ pub async fn sign_raw(ctx: HandlerContext) -> Result<PbResponse, Error> {
     let mut psbt = Psbt::deserialize(&psbt_bytes)
         .map_err(|e| Error::InvalidPsbt(format!("invalid PSBT: {e}")))?;
 
-    let (wallet, _metadata) = WalletManager::load_bdk_wallet(&ctx.storage, name).await?;
+    let (wallet, _metadata) = WalletManager::load_bdk_wallet(ctx.storage.clone(), name).await?;
 
     let finalized = wallet
         .sign(&mut psbt, SignOptions::default())

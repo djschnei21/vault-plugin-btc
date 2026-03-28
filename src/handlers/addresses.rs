@@ -14,15 +14,15 @@ pub async fn new_address(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .get("name")
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?;
 
-    let mut metadata = WalletManager::get_metadata(&ctx.storage, name).await?;
-    let (wallet, _) = WalletManager::load_bdk_wallet(&ctx.storage, name).await?;
+    let mut metadata = WalletManager::get_metadata(ctx.storage.clone(), name).await?;
+    let (wallet, _) = WalletManager::load_bdk_wallet(ctx.storage.clone(), name).await?;
 
     let index = metadata.next_external_index;
     let address_info = wallet.peek_address(KeychainKind::External, index);
 
     // Advance the index
     metadata.next_external_index = index + 1;
-    WalletManager::update_metadata(&ctx.storage, &metadata).await?;
+    WalletManager::update_metadata(ctx.storage.clone(), &metadata).await?;
 
     Ok(ok_response(serde_json::json!({
         "address": address_info.address.to_string(),
@@ -40,7 +40,7 @@ pub async fn list_addresses(ctx: HandlerContext) -> Result<PbResponse, Error> {
         .get("name")
         .ok_or_else(|| Error::InvalidRequest("missing wallet name".to_string()))?;
 
-    let metadata = WalletManager::get_metadata(&ctx.storage, name).await?;
+    let metadata = WalletManager::get_metadata(ctx.storage.clone(), name).await?;
 
     if metadata.next_external_index == 0 {
         return Ok(ok_response(serde_json::json!({
@@ -49,7 +49,7 @@ pub async fn list_addresses(ctx: HandlerContext) -> Result<PbResponse, Error> {
         })));
     }
 
-    let (wallet, _) = WalletManager::load_bdk_wallet(&ctx.storage, name).await?;
+    let (wallet, _) = WalletManager::load_bdk_wallet(ctx.storage.clone(), name).await?;
 
     let mut addresses = Vec::new();
     for i in 0..metadata.next_external_index {
