@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use vault_plugin_btc::proto::pb::Request as PbRequest;
 use vault_plugin_btc::proto::pb::Response as PbResponse;
@@ -47,6 +48,34 @@ pub async fn bootstrap_wallet(
         )
         .await
         .expect("wallet bootstrap must succeed");
+}
+
+#[allow(dead_code)]
+pub async fn seed_json(storage: Arc<InMemoryStorage>, key: &str, value: Value) {
+    storage
+        .put(
+            key,
+            serde_json::to_vec(&value).expect("seeded JSON should serialize"),
+        )
+        .await
+        .expect("seeded JSON should be written");
+}
+
+#[allow(dead_code)]
+pub async fn load_json(storage: Arc<InMemoryStorage>, key: &str) -> Option<Value> {
+    storage
+        .get(key)
+        .await
+        .expect("seeded JSON should be readable")
+        .map(|bytes| serde_json::from_slice(&bytes).expect("stored JSON should deserialize"))
+}
+
+#[allow(dead_code)]
+pub fn unix_time_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_secs()
 }
 
 #[async_trait]

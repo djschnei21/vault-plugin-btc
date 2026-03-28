@@ -1,6 +1,7 @@
 use crate::error::Error;
 use crate::storage::Storage;
 use crate::wallet::descriptors::{build_descriptors, to_public_descriptor};
+use crate::wallet::reservations::AddressReservation;
 use crate::wallet::types::{AddressType, WalletMetadata, WalletSecrets};
 use bdk_wallet::Wallet;
 use bip39::Mnemonic;
@@ -10,6 +11,7 @@ use serde_json;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::time::sleep;
 use tracing::info;
 
 /// Manages wallet lifecycle: create, load, delete.
@@ -223,17 +225,68 @@ impl WalletManager {
         let wallet_lock = crate::wallet::locks::wallet_lock(name).await;
         let _guard = wallet_lock.lock().await;
 
-        let mut metadata = Self::get_metadata(storage.clone(), name).await?;
-        let (wallet, _) = Self::load_bdk_wallet(storage.clone(), name).await?;
-        let index = metadata.next_external_index;
-        let address = wallet
-            .peek_address(bdk_wallet::KeychainKind::External, index)
-            .address
-            .to_string();
+        for attempt in 0..=AddressReservation::max_retries() {
+            let mut metadata = Self::get_metadata(storage.clone(), name).await?;
+            let index = metadata.next_external_index;
+            let existing_reservation = AddressReservation::load(storage.clone(), name).await?;
 
-        metadata.next_external_index = index + 1;
-        Self::update_metadata(storage, &metadata).await?;
+            if let Some(existing) = existing_reservation {
+                if existing.index != index || existing.is_stale() {
+                    AddressReservation::clear(storage.clone(), name).await?;
+                } else if attempt == AddressReservation::max_retries() {
+                    return Err(Box::new(Error::Internal(format!(
+                        "address reservation conflict for wallet {name}"
+                    ))));
+                } else {
+                    sleep(AddressReservation::retry_delay()).await;
+                    continue;
+                }
+            }
 
-        Ok((address, index))
+            let reservation = AddressReservation::new(index);
+            reservation.store(storage.clone(), name).await?;
+
+            if !reservation.is_owned_by(storage.clone(), name).await? {
+                if attempt == AddressReservation::max_retries() {
+                    return Err(Box::new(Error::Internal(format!(
+                        "address reservation verification failed for wallet {name}"
+                    ))));
+                }
+
+                sleep(AddressReservation::retry_delay()).await;
+                continue;
+            }
+
+            metadata = Self::get_metadata(storage.clone(), name).await?;
+            if metadata.next_external_index != index {
+                reservation.clear_if_owned(storage.clone(), name).await?;
+
+                if attempt == AddressReservation::max_retries() {
+                    return Err(Box::new(Error::Internal(format!(
+                        "wallet metadata advanced during reservation for wallet {name}"
+                    ))));
+                }
+
+                sleep(AddressReservation::retry_delay()).await;
+                continue;
+            }
+
+            let (wallet, _) = Self::load_bdk_wallet(storage.clone(), name).await?;
+            let address = wallet
+                .peek_address(bdk_wallet::KeychainKind::External, index)
+                .address
+                .to_string();
+
+            metadata.next_external_index = index + 1;
+
+            Self::update_metadata(storage.clone(), &metadata).await?;
+            reservation.clear_if_owned(storage, name).await?;
+
+            return Ok((address, index));
+        }
+
+        Err(Box::new(Error::Internal(format!(
+            "failed to allocate address for wallet {name}"
+        ))))
     }
 }
