@@ -1,0 +1,13 @@
+# Bitcoin Secret Engine Dependency Assumptions
+
+## Vault
+- `put_sealed` applies seal-wrap semantics to `wallets/{name}/secrets`
+- Storage read-after-write consistency is sufficient for single-process request handling
+
+## BDK
+- `Wallet::create(...).create_wallet_no_persist()` does not persist secrets outside the plugin process
+- `Wallet::sign` only signs inputs controlled by the loaded descriptors
+
+## bitcoin
+- PSBT parsing rejects structurally invalid inputs before signing
+- Transaction serialization preserves consensus-critical fields
