@@ -60,6 +60,8 @@ struct Route {
 }
 
 /// Routes Vault requests to handler functions based on path and operation.
+const MAX_REQUEST_DATA_BYTES: usize = 64 * 1024;
+
 pub struct Router {
     routes: Vec<Route>,
 }
@@ -129,8 +131,15 @@ impl Router {
                     let data = if request.data.is_empty() {
                         serde_json::Value::Object(serde_json::Map::new())
                     } else {
+                        if request.data.len() > MAX_REQUEST_DATA_BYTES {
+                            return Err(Error::InvalidRequest(format!(
+                                "request body too large: {} bytes",
+                                request.data.len()
+                            )));
+                        }
+
                         serde_json::from_str(&request.data)
-                            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+                            .map_err(|e| Error::InvalidRequest(format!("invalid JSON body: {e}")))?
                     };
 
                     let ctx = HandlerContext {
