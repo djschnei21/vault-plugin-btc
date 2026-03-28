@@ -3,6 +3,7 @@
 ## Vault
 - `put_sealed` applies seal-wrap semantics to `wallets/{name}/secrets`
 - Storage read-after-write consistency is sufficient for single-process request handling
+- Storage visibility and read-after-write consistency are sufficient for storage-backed address reservation conflict detection and bounded stale-reservation recovery across plugin processes
 
 ## BDK
 - `Wallet::create(...).create_wallet_no_persist()` does not persist secrets outside the plugin process
