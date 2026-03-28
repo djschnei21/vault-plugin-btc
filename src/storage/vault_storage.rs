@@ -21,7 +21,7 @@ impl VaultStorageImpl {
     }
 
     /// Get a value from storage by key.
-    pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, Error> {
+    pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
         let resp = self
             .client
             .clone()
@@ -33,7 +33,7 @@ impl VaultStorageImpl {
             .into_inner();
 
         if !resp.err.is_empty() {
-            return Err(Error::Storage(resp.err));
+            return Err(Box::new(Error::Storage(resp.err)));
         }
 
         Ok(resp.entry.map(|e| e.value))
@@ -56,7 +56,7 @@ impl VaultStorageImpl {
             .into_inner();
 
         if !resp.err.is_empty() {
-            return Err(Error::Storage(resp.err));
+            return Err(Box::new(Error::Storage(resp.err)));
         }
 
         Ok(())
@@ -79,7 +79,7 @@ impl VaultStorageImpl {
             .into_inner();
 
         if !resp.err.is_empty() {
-            return Err(Error::Storage(resp.err));
+            return Err(Box::new(Error::Storage(resp.err)));
         }
 
         Ok(())
@@ -98,7 +98,7 @@ impl VaultStorageImpl {
             .into_inner();
 
         if !resp.err.is_empty() {
-            return Err(Error::Storage(resp.err));
+            return Err(Box::new(Error::Storage(resp.err)));
         }
 
         Ok(())
@@ -117,7 +117,7 @@ impl VaultStorageImpl {
             .into_inner();
 
         if !resp.err.is_empty() {
-            return Err(Error::Storage(resp.err));
+            return Err(Box::new(Error::Storage(resp.err)));
         }
 
         Ok(resp.keys)
@@ -127,7 +127,7 @@ impl VaultStorageImpl {
     pub async fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         key: &str,
-    ) -> Result<Option<T>, Error> {
+    ) -> Result<Option<T>, Box<dyn std::error::Error>> {
         match self.get(key).await? {
             Some(data) => {
                 let value = serde_json::from_slice(&data)?;
@@ -138,7 +138,7 @@ impl VaultStorageImpl {
     }
 
     /// Helper: serialize to JSON and store.
-    pub async fn put_json<T: serde::Serialize>(&self, key: &str, value: &T) -> Result<(), Error> {
+    pub async fn put_json<T: serde::Serialize>(&self, key: &str, value: &T) -> Result<(), Box<dyn std::error::Error>> {
         let data = serde_json::to_vec(value)?;
         self.put(key, &data).await
     }
@@ -156,23 +156,23 @@ impl VaultStorageImpl {
 
 #[async_trait]
 impl Storage for VaultStorageImpl {
-    async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, Error> {
+    async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
         VaultStorageImpl::get(self, key).await
     }
 
-    async fn put(&self, key: &str, value: Vec<u8>) -> Result<(), Error> {
+    async fn put(&self, key: &str, value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
         VaultStorageImpl::put(self, key, &value).await
     }
 
-    async fn delete(&self, key: &str) -> Result<(), Error> {
+    async fn delete(&self, key: &str) -> Result<(), Box<dyn std::error::Error>> {
         VaultStorageImpl::delete(self, key).await
     }
 
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, Error> {
+    async fn list(&self, prefix: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         VaultStorageImpl::list(self, prefix).await
     }
 
-    async fn put_sealed(&self, key: &str, value: Vec<u8>) -> Result<(), Error> {
+    async fn put_sealed(&self, key: &str, value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
         VaultStorageImpl::put_seal_wrapped(self, key, &value).await
     }
 }

@@ -1,5 +1,9 @@
-use crate::error::Error;
 use crate::proto::pb;
+use crate::proto::pb::{
+    backend_server::Backend, SetupArgs, SetupReply, InitializeArgs, InitializeReply, TypeReply, SpecialPathsReply, Paths, HandleRequestArgs, HandleRequestReply, HandleExistenceCheckArgs, HandleExistenceCheckReply, InvalidateKeyArgs,
+    storage_client::StorageClient,
+};
+use crate::proto::plugin::Empty;
 use crate::router::Router;
 use crate::server::broker_service::BrokerService;
 use crate::storage::{Storage, VaultStorage};

@@ -29,7 +29,7 @@ impl WalletManager {
         // Check if wallet already exists
         let meta_key = format!("wallets/{}/metadata", name);
         if storage.get(&meta_key).await?.is_some() {
-            return Err(Box::new(Error::WalletAlreadyExists(name.to_string())));
+            return Err(Error::WalletAlreadyExists(name.to_string()));
         }
 
         // Generate or parse mnemonic
@@ -59,7 +59,7 @@ impl WalletManager {
             internal_descriptor_private: int_desc,
         };
         let secrets_key = format!("wallets/{}/secrets", name);
-        let secrets_data = serde_json::to_vec(&secrets).map_err(|e| Box::new(Error::Serde(e)))?;
+        let secrets_data = serde_json::to_vec(&secrets)?;
         storage.put_sealed(&secrets_key, secrets_data).await.map_err(|e| Error::Storage(e.to_string()))?;
 
         // Store metadata
@@ -78,7 +78,7 @@ impl WalletManager {
             next_external_index: 0,
             next_internal_index: 0,
         };
-        let metadata_data = serde_json::to_vec(&metadata).map_err(|e| Box::new(Error::Serde(e)))?;
+        let metadata_data = serde_json::to_vec(&metadata)?;
         storage.put(&meta_key, metadata_data).await.map_err(|e| Error::Storage(e.to_string()))?;
 
         info!(wallet = name, "wallet created");
@@ -111,10 +111,10 @@ impl WalletManager {
         let data = storage.get(&key).await.map_err(|e| Error::Storage(e.to_string()))?;
         match data {
             Some(d) => {
-                let value: WalletSecrets = serde_json::from_slice(&d).map_err(|e| Box::new(Error::Serde(e)))?;
+                let value: WalletSecrets = serde_json::from_slice(&d).map_err(Error::Serde)?;
                 Ok(value)
             }
-            None => Err(Error::WalletNotFound(name.to_string())),
+            None => Err(Box::new(Error::WalletNotFound(name.to_string()))),
         }
     }
 
@@ -145,7 +145,7 @@ impl WalletManager {
         metadata: &WalletMetadata,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let key = format!("wallets/{}/metadata", metadata.name);
-        let data = serde_json::to_vec(metadata).map_err(|e| Box::new(Error::Serde(e)))?;
+        let data = serde_json::to_vec(metadata).map_err(Error::Serde)?;
         Ok(storage.put(&key, data).await.map_err(|e| Error::Storage(e.to_string()))?)
     }
 

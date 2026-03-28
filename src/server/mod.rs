@@ -1,14 +1,14 @@
-pub mod backend_service;
 pub mod broker_service;
 pub mod controller_service;
 pub mod stdio_service;
+// pub mod backend_service;
 
-use crate::proto::pb::backend_server::BackendServer;
 use crate::proto::plugin::grpc_broker_server::GrpcBrokerServer;
 use crate::proto::plugin::grpc_controller_server::GrpcControllerServer;
 use crate::proto::plugin::grpc_stdio_server::GrpcStdioServer;
+// use crate::proto::pb::backend_server::BackendServer;
 use crate::router::Router;
-use backend_service::BackendService;
+// use backend_service::BackendService;
 use broker_service::BrokerService;
 use controller_service::ControllerService;
 use stdio_service::StdioService;
@@ -77,7 +77,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let broker = Arc::new(BrokerService::new());
     let router = Router::new();
-    let backend = BackendService::new(broker.clone(), router);
+    // let backend = BackendService::new(broker.clone(), router);
 
     let controller = ControllerService::new(shutdown_tx);
     let stdio = StdioService::empty();
@@ -107,14 +107,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build health service
     let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
-    health_reporter
-        .set_serving::<BackendServer<BackendService>>()
-        .await;
+    // health_reporter
+    //     .set_serving::<BackendServer<BackendService>>()
+    //     .await;
 
     let server = Server::builder()
         .tls_config(tls_config)?
         .add_service(health_service)
-        .add_service(BackendServer::new(backend))
+        // .add_service(BackendServer::new(backend))
         .add_service(GrpcBrokerServer::new((*broker).clone()))
         .add_service(GrpcControllerServer::new(controller))
         .add_service(GrpcStdioServer::new(stdio));
